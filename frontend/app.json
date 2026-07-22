@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "frontend",
+    "slug": "frontend",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.caedinm.frontend"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "WhereTheyAt shares your live location with your crew during the festival."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "WhereTheyAt needs access to your photos so you can pick a profile picture."
+        }
+      ],
+      "expo-secure-store",
+      "expo-web-browser"
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+# build notes
+initial_backend_spec.md
+shipping.md
+
+# claude config files
+.claude/*
+
+# root files
+node_modules/
+.env
+
+# frontend files
+frontend/.env
+frontend/node_modules/
+frontend/.expo/
+
+# admin files
+admin/.env
+admin/node_modules/
+admin/dist/
+
+# backend files
+backend/.env
+backend/.venv
+
+# backend database
+backend/WhereTheyAt.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# image uploads
+backend/uploads/
+
+# macos files
+.DS_Store
+
+# Python caches
+**/__pycache__/*
+*.py[cod]

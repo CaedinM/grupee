@@ -1,0 +1,228 @@
+"""Pydantic v2 request/response models."""
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+LandmarkKind = Literal["stage", "food", "drinks", "medical", "restroom", "exit", "meetup", "other"]
+
+
+# ---------- Users ----------
+
+def _clean_display_name(value: str) -> str:
+    """min_length alone lets "   " through, which renders as a nameless pin."""
+    cleaned = value.strip()
+    if not cleaned:
+        raise ValueError("display_name must not be blank")
+    return cleaned
+
+
+class UserCreate(BaseModel):
+    display_name: str = Field(min_length=1)
+
+    _strip_name = field_validator("display_name")(_clean_display_name)
+
+
+class UserUpdate(BaseModel):
+    display_name: str = Field(min_length=1)
+
+    _strip_name = field_validator("display_name")(_clean_display_name)
+
+
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    display_name: str
+    avatar_url: str | None
+    is_admin: bool
+    created_at: datetime
+
+
+# ---------- Locations ----------
+
+class LocationIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    heading: float | None = Field(default=None, ge=0, le=360)
+    battery: int | None = Field(default=None, ge=0, le=100)
+    accuracy: float | None = Field(default=None, ge=0)
+
+
+class LocationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    user_id: str
+    lat: float
+    lng: float
+    heading: float | None
+    battery: int | None
+    accuracy: float | None
+    updated_at: datetime
+
+
+class LocationSnapshot(BaseModel):
+    """Location as embedded in the group-locations read (no user_id repetition)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    lat: float
+    lng: float
+    heading: float | None
+    battery: int | None
+    accuracy: float | None
+    updated_at: datetime
+
+
+# ---------- Groups & membership ----------
+
+class GroupCreate(BaseModel):
+    name: str = Field(min_length=1)
+    event_id: str | None = None
+
+
+class GroupOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    code: str
+    name: str
+    event_id: str | None
+    creator_id: str | None
+    created_at: datetime
+
+
+class MemberOut(BaseModel):
+    user_id: str
+    display_name: str
+    avatar_url: str | None
+    role: str
+
+
+class GroupDetailOut(GroupOut):
+    members: list[MemberOut]
+
+
+class MembershipOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    user_id: str
+    group_id: str
+    role: str
+    joined_at: datetime
+
+
+class UserGroupOut(GroupOut):
+    role: str
+
+
+class MemberLocationOut(BaseModel):
+    user_id: str
+    display_name: str
+    avatar_url: str | None
+    role: str
+    location: LocationSnapshot | None
+
+
+class GroupLocationsOut(BaseModel):
+    members: list[MemberLocationOut]
+
+
+# ---------- Events & map ----------
+
+LatLng = list[float]
+
+# A geofence is a polygon of 3..30 vertices (the closing edge back to the
+# first point is implied, not stored).
+BOUNDARY_MIN_POINTS = 3
+BOUNDARY_MAX_POINTS = 30
+
+
+def _validate_points(points: list[LatLng]) -> list[LatLng]:
+    if len(points) < BOUNDARY_MIN_POINTS:
+        raise ValueError(f"a boundary needs at least {BOUNDARY_MIN_POINTS} points")
+    if len(points) > BOUNDARY_MAX_POINTS:
+        raise ValueError(f"a boundary can have at most {BOUNDARY_MAX_POINTS} points")
+    for point in points:
+        if len(point) != 2:
+            raise ValueError("each boundary point must be a [lat, lng] pair")
+        lat, lng = point
+        if not -90 <= lat <= 90:
+            raise ValueError(f"latitude {lat} out of range -90..90")
+        if not -180 <= lng <= 180:
+            raise ValueError(f"longitude {lng} out of range -180..180")
+    return points
+
+
+class EventCreate(BaseModel):
+    name: str = Field(min_length=1)
+    starts_at: datetime | None = None
+    ends_at: datetime | None = None
+    # Optional so the event can exist before its geofence is drawn.
+    boundary: list[LatLng] | None = None
+
+    @field_validator("boundary")
+    @classmethod
+    def check_boundary(cls, v: list[LatLng] | None) -> list[LatLng] | None:
+        return None if v is None else _validate_points(v)
+
+    @model_validator(mode="after")
+    def check_schedule(self) -> "EventCreate":
+        if self.starts_at and self.ends_at and self.ends_at <= self.starts_at:
+            raise ValueError("ends_at must be after starts_at")
+        return self
+
+
+class EventUpdate(EventCreate):
+    """PUT /events/{id} is a full replacement of the same fields as create."""
+
+
+class EventOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: str
+    boundary: list[LatLng] | None
+    starts_at: datetime | None
+    ends_at: datetime | None
+    creator_id: str | None
+    created_at: datetime
+
+
+class BoundaryIn(BaseModel):
+    points: list[LatLng]
+
+    @field_validator("points")
+    @classmethod
+    def check_points(cls, v: list[LatLng]) -> list[LatLng]:
+        return _validate_points(v)
+
+
+class BoundaryOut(BaseModel):
+    boundary: list[LatLng]
+    count: int
+
+
+class LandmarkCreate(BaseModel):
+    name: str = Field(min_length=1)
+    kind: LandmarkKind
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class LandmarkOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    event_id: str
+    name: str
+    kind: str
+    lat: float
+    lng: float
+    created_at: datetime
+
+
+class MapOut(BaseModel):
+    boundary: list[LatLng] | None
+    landmarks: list[LandmarkOut]
