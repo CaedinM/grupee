@@ -14,7 +14,7 @@ Only the latest position per user is stored — no history.
 ## Monorepo structure
 
 ```
-backend/     FastAPI + SQLite (v2 will migrate to a hosted Postgres DB)
+backend/     FastAPI — SQLite locally, hosted Postgres on Railway
 frontend/    Expo / React Native app - the user client
 admin/       Vite + React Ops console
 ```
@@ -29,7 +29,7 @@ Three standalone packages, no workspace tooling; they meet at the HTTP contract.
 
 ## Tech stack
 
-- **Backend:** FastAPI, SQLAlchemy 2.0, SQLite (locally)
+- **Backend:** FastAPI, SQLAlchemy 2.0, Alembic; SQLite locally, Railway Postgres in prod
 - **Frontend:** Expo SDK 54 / React Native 0.81
 - **Admin App:** Vite 8, React 19
 - **Auth:** Clerk
@@ -46,11 +46,13 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env          # set CLERK_PUBLISHABLE_KEY
+alembic upgrade head          # build the schema
 uvicorn app.main:app --reload --host 0.0.0.0
 ```
 
 Docs at http://127.0.0.1:8000/docs. Bind `0.0.0.0` so a phone on the same Wi-Fi can reach
-it. `rm WhereTheyAt.db` resets local state. `AUTH_DEV_MODE=1` skips token verification for
+it. `rm WhereTheyAt.db && alembic upgrade head` resets local state — Alembic owns the
+schema, the app creates nothing at startup. `AUTH_DEV_MODE=1` skips token verification for
 keyless dev — never in prod. `./smoke_test.sh` (against a dev-auth server) is the test suite.
 
 ### Frontend

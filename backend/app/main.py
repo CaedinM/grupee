@@ -7,47 +7,15 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import inspect, text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from .database import Base, engine
 from .logging_config import logger
 from .routers import events, groups, users
 from .storage import UPLOAD_DIR
 
-# Schema management: create_all on startup is fine for this demo.
-# TODO: Alembic migrations are the upgrade path once the schema needs to evolve.
-Base.metadata.create_all(bind=engine)
-
-
-def ensure_columns() -> None:
-    """Mini-migration: create_all never ALTERs existing tables, so columns
-    added after a database was created must be bolted on here. Every statement
-    is a no-op on up-to-date databases and works on SQLite and Postgres alike."""
-    inspector = inspect(engine)
-    users = {c["name"] for c in inspector.get_columns("users")}
-    events = {c["name"] for c in inspector.get_columns("events")}
-    landmarks = {c["name"] for c in inspector.get_columns("landmarks")}
-    with engine.begin() as conn:
-        if "clerk_id" not in users:
-            conn.execute(text("ALTER TABLE users ADD COLUMN clerk_id VARCHAR"))
-        conn.execute(
-            text("CREATE UNIQUE INDEX IF NOT EXISTS uq_users_clerk_id ON users (clerk_id)")
-        )
-        if "is_admin" not in users:
-            conn.execute(
-                text("ALTER TABLE users ADD COLUMN is_admin BOOLEAN NOT NULL DEFAULT 0")
-            )
-        for column in ("starts_at", "ends_at"):
-            if column not in events:
-                conn.execute(
-                    text(f"ALTER TABLE events ADD COLUMN {column} TIMESTAMP WITH TIME ZONE")
-                )
-        if "boundary" not in landmarks:
-            conn.execute(text("ALTER TABLE landmarks ADD COLUMN boundary JSON"))
-
-
-ensure_columns()
+# Schema management is Alembic's job — `alembic upgrade head`, run as Railway's
+# pre-deploy command so it happens once per deploy rather than in every worker.
+# The app deliberately does no DDL at startup.
 
 app = FastAPI(title="WhereTheyAt", description="Festival friend-finder backend")
 

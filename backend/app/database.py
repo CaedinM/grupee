@@ -7,14 +7,38 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./WhereTheyAt.db")
 
-# SQLite needs check_same_thread=False to be shared across FastAPI's threadpool.
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+def normalize_database_url(url: str) -> str:
+    """Railway (and Heroku-style providers) hand out `postgres://`, a scheme
+    SQLAlchemy 2.0 dropped. Rewrite it to the driver we actually install."""
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + url[len("postgres://") :]
+    return url
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
-if DATABASE_URL.startswith("sqlite"):
+# Exported so alembic/env.py resolves the URL exactly the way the app does.
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL", "sqlite:///./WhereTheyAt.db"))
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+
+if IS_SQLITE:
+    # SQLite needs check_same_thread=False to be shared across FastAPI's threadpool.
+    engine_kwargs = {"connect_args": {"check_same_thread": False}}
+else:
+    # Sizing for the polling load: each active user is ~1.3 location writes +
+    # ~0.5 group reads per second, and the sync endpoints run on Starlette's
+    # ~40-thread pool, so the 5+10 default would queue. pre_ping/recycle because
+    # managed Postgres (Railway) drops idle connections out from under the pool.
+    engine_kwargs = {
+        "pool_size": 10,
+        "max_overflow": 10,
+        "pool_pre_ping": True,
+        "pool_recycle": 1800,
+    }
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
+
+if IS_SQLITE:
     # SQLite ignores ON DELETE CASCADE unless foreign keys are switched on per-connection.
     @event.listens_for(engine, "connect")
     def _enable_sqlite_fks(dbapi_connection, connection_record):

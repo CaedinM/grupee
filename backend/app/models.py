@@ -1,7 +1,8 @@
 """SQLAlchemy models.
 
-Schema management: tables are created via Base.metadata.create_all() on startup.
-# TODO: switch to Alembic migrations when the schema starts evolving in production.
+Schema management is Alembic (`backend/alembic/`) — these classes are the source
+of truth autogenerate diffs against, but nothing here reaches the database until
+a revision is generated and `alembic upgrade head` runs.
 """
 import uuid
 from datetime import datetime, timezone
@@ -53,8 +54,9 @@ class TZDateTime(TypeDecorator):
 
 class User(Base):
     __tablename__ = "users"
-    # Named to match the CREATE UNIQUE INDEX IF NOT EXISTS in main.py's
-    # ensure_columns(), so fresh and migrated databases end up identical.
+    # Explicitly named (rather than left to the ix_ convention) because the
+    # index predates Alembic — databases built by the old create_all path carry
+    # this name, and the baseline revision keeps it.
     __table_args__ = (Index("uq_users_clerk_id", "clerk_id", unique=True),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)

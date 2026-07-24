@@ -11,14 +11,27 @@ cd backend
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 # DATABASE_URL is optional — defaults to sqlite:///./WhereTheyAt.db
+alembic upgrade head          # build the schema (required — the app does no DDL)
 # Auth needs CLERK_PUBLISHABLE_KEY in .env (see .env.example), or use
 # AUTH_DEV_MODE=1 to skip token verification for local dev:
 uvicorn app.main:app --reload
 ```
 
-The API is at http://127.0.0.1:8000 — interactive docs at http://127.0.0.1:8000/docs. Tables are created automatically on startup (`create_all`; Alembic is the upgrade path when the schema needs migrations).
+The API is at http://127.0.0.1:8000 — interactive docs at http://127.0.0.1:8000/docs.
 
-To use Postgres instead, copy `.env.example` to `.env` and set `DATABASE_URL` to your connection string.
+To use Postgres instead, copy `.env.example` to `.env`, set `DATABASE_URL` to your connection string, and run `alembic upgrade head` against it.
+
+## Schema migrations
+
+Alembic owns the schema; the app creates nothing at startup. After editing `app/models.py`:
+
+```bash
+alembic revision --autogenerate -m "what changed"   # review the generated file
+alembic upgrade head
+alembic check                                       # models vs. head — should report no drift
+```
+
+Two things to know when reviewing a generated revision: the `TZDateTime` decorator renders as an unimportable `app.models.TZDateTime` and must be replaced with `sa.DateTime(timezone=True)`, and `alembic.ini` deliberately carries no `sqlalchemy.url` — `env.py` reads `DATABASE_URL` so migrations always follow the app's database.
 
 ## Authentication
 
@@ -64,6 +77,24 @@ It walks the full acceptance flow: unauthenticated requests are rejected, two us
 
 Event writes are allowed for the event's creator (from the verified token) and platform admins (`users.is_admin`, granted only by direct DB update); anyone else gets 403.
 
-## Deploy (Railway / Render)
+## Deploy (Railway)
 
-Push this `backend/` directory, provision a managed Postgres, and set the service's `DATABASE_URL` env var to its connection string (a `postgresql://...` URL) plus `CLERK_PUBLISHABLE_KEY` (use the `pk_live_...` key from a Clerk production instance). Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`. Nothing else is needed — tables are created on first boot, and the same code runs unchanged against SQLite and Postgres.
+`railway.json` in this directory carries the build and deploy config — Nixpacks build, `alembic upgrade head` as the pre-deploy command, `uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 2` as the start command, and `/health` as the healthcheck. Python is pinned by `.python-version`.
+
+Set up, once:
+
+1. Create a Railway project from this repo and add a **Postgres** database to it.
+2. On the API service, set **Root Directory** to `backend` (this is a monorepo — the repo root has no Python).
+3. Set the service variables:
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` — a Railway reference, so it resolves over the private network |
+   | `CLERK_PUBLISHABLE_KEY` | your Clerk key (`pk_live_...` once a production instance exists) |
+   | `LOG_LEVEL` | `INFO` |
+
+   **Never set `AUTH_DEV_MODE` on a deployed service** — it accepts any bearer token without verification.
+
+4. Point the clients at the deployed HTTPS URL: `EXPO_PUBLIC_API_URL` in `frontend/.env`, `VITE_API_URL` in `admin/.env`.
+
+Migrations run in the pre-deploy step, so they happen once per deploy rather than racing across workers. Uploads still fall back to local disk unless `S3_BUCKET` is set — and container filesystems are ephemeral, so avatars do not survive a redeploy until object storage is configured (see `../shipping.md`).
