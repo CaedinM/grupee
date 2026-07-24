@@ -208,6 +208,52 @@ export function getEvent(eventId: string): Promise<FestivalEvent> {
   return request<FestivalEvent>(`/events/${eventId}`);
 }
 
+// Mirrors the backend's LandmarkKind Literal (schemas.py). Only stages are
+// individually named; the server fills generic labels for the rest.
+export type LandmarkKind =
+  | "stage"
+  | "entrance"
+  | "exit"
+  | "restroom"
+  | "food"
+  | "drinks"
+  | "medical"
+  | "meetup"
+  | "other";
+
+export interface Landmark {
+  id: string;
+  event_id: string;
+  name: string;
+  kind: LandmarkKind;
+  lat: number;
+  lng: number;
+  /** Optional geofence for the landmark — a polygon of [lat, lng] vertices, or null. */
+  boundary: [number, number][] | null;
+  created_at: string;
+}
+
+export function listLandmarks(eventId: string): Promise<Landmark[]> {
+  return request<Landmark[]>(`/events/${eventId}/landmarks`);
+}
+
+// A performance slot: an artist on a stage (landmark_id) for a time window.
+// Named EventSet, not Set, to avoid shadowing the built-in Set. landmark_id is
+// null for sets scheduled before their stage exists (see backend SetBase).
+export interface EventSet {
+  id: string;
+  event_id: string;
+  landmark_id: string | null;
+  artist: string;
+  start_time: string;
+  end_time: string;
+  created_at: string;
+}
+
+export function listSets(eventId: string): Promise<EventSet[]> {
+  return request<EventSet[]>(`/events/${eventId}/sets`);
+}
+
 // Creator/joiner identity comes from the auth token, not the body.
 export function createGroup(name: string, eventId: string): Promise<Group> {
   return request<Group>("/groups", {

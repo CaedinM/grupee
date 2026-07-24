@@ -1,13 +1,37 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRef, useState } from "react";
-import { Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import { avatarSource, avatarUri, type Group, type User } from "./api";
+import {
+  avatarSource,
+  avatarUri,
+  type EventSet,
+  type Group,
+  type Landmark,
+  type User,
+} from "./api";
+import { landmarksContaining } from "./geo";
+import { useEventLandmarks } from "./useEventLandmarks";
+import { currentSetForLandmark, upcomingSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
 import { useGroupLocations } from "./useGroupLocations";
 import type { LocationReporting } from "./useLocationReporting";
+
+// Ionicon per landmark kind. Falls back to a generic pin for the "other" kind
+// and anything the server adds before this map does.
+const LANDMARK_ICONS: Record<Landmark["kind"], keyof typeof Ionicons.glyphMap> = {
+  stage: "musical-notes",
+  entrance: "log-in",
+  exit: "log-out",
+  restroom: "male-female",
+  food: "restaurant",
+  drinks: "beer",
+  medical: "medkit",
+  meetup: "flag",
+  other: "location",
+};
 
 /**
  * A point guaranteed inside the boundary polygon ([lat, lng] points), for
@@ -93,6 +117,33 @@ export default function MapScreen({
   const mapRef = useRef<MapView>(null);
   const insets = useSafeAreaInsets();
 
+  // Which stage's info bubble is open, and where to anchor it (screen pixels).
+  // We render the bubble ourselves as an overlay rather than using a native
+  // Callout: the custom-tooltip Callout draws its content once before animating
+  // (a visible flash) and fights the ~1.5s location re-render. A plain overlay
+  // gives full control over show/hide and the pop-in.
+  const [selectedStage, setSelectedStage] = useState<SelectedStage | null>(null);
+  const closeStage = useCallback(() => setSelectedStage(null), []);
+
+  // The press handler is stable (so markers stay cheap), but needs the current
+  // live flag and schedule — read them from a ref that each render refreshes.
+  const stageDataRef = useRef<{ live: boolean; sets: EventSet[] }>({ live: false, sets: [] });
+  const onSelectStage = useCallback(async (landmark: Landmark) => {
+    const { live, sets } = stageDataRef.current;
+    // Tapping any non-stage pin (or any pin outside a live event) just closes an
+    // open bubble; only live stages open one.
+    if (!live || landmark.kind !== "stage") {
+      setSelectedStage(null);
+      return;
+    }
+    const callout = stageCalloutFor(sets, landmark.id, Date.now());
+    const point = await mapRef.current?.pointForCoordinate({
+      latitude: landmark.lat,
+      longitude: landmark.lng,
+    });
+    if (point) setSelectedStage({ landmark, callout, x: point.x, y: point.y });
+  }, []);
+
   const coordinate = fix
     ? { latitude: fix.coords.latitude, longitude: fix.coords.longitude }
     : lastAck
@@ -107,7 +158,23 @@ export default function MapScreen({
   // yet or not — it shows where to head. Points are [lat, lng].
   const boundary = group ? (liveness.event?.boundary ?? null) : null;
 
+  // Landmarks are gated exactly like the boundary: only for the event the
+  // active group belongs to, and only while in that group (a null event_id
+  // yields an empty list). Shown regardless of liveness — they're wayfinding.
+  const landmarks = useEventLandmarks(group?.event_id ?? null);
+
+  // Sets are only surfaced while the event is live, so only fetch them then —
+  // the "now playing" artist is meaningless before/after the festival.
+  const sets = useEventSets(live ? (group?.event_id ?? null) : null);
+  stageDataRef.current = { live, sets };
+
+  // Drop any open bubble when the event/liveness changes out from under it.
+  useEffect(() => setSelectedStage(null), [live, group?.event_id]);
+
   const recenter = () => {
+    // Recentering moves the map, so the overlay bubble's anchor would drift —
+    // close it rather than leave it floating over the wrong pin.
+    setSelectedStage(null);
     if (coordinate) {
       // animateCamera (not animateToRegion) so the 3D pitch survives recentering.
       mapRef.current?.animateCamera({ center: coordinate, ...CAMERA_TILT }, { duration: 300 });
@@ -131,6 +198,15 @@ export default function MapScreen({
 
   const displayedError = error ?? groupError;
 
+  // Landmarks whose geofence currently contains the user. Landmarks are already
+  // scoped to the active group's event, so this answers "which landmark am I in
+  // at the event I'm at". Usually one, but overlapping zones can yield several.
+  const insideLandmarks = landmarksContaining(landmarks, coordinate);
+
+  // Re-read on each render; while live the location fix re-renders this screen
+  // every ~1.5s, which is far finer than set boundaries need.
+  const now = Date.now();
+
   return (
     <View style={styles.container}>
       <MapView
@@ -141,6 +217,10 @@ export default function MapScreen({
         mapType={Platform.OS === "ios" ? "mutedStandard" : "standard"}
         showsBuildings
         showsPointsOfInterest={false}
+        // A tap on empty map, or the start of a pan/zoom, closes the stage
+        // bubble instantly — no waiting on a native deselect.
+        onPress={closeStage}
+        onPanDrag={closeStage}
       >
         {boundary && (
           <Polygon
@@ -162,6 +242,10 @@ export default function MapScreen({
           </Marker>
         )}
 
+        {landmarks.map((l) => (
+          <LandmarkMarker key={l.id} landmark={l} onPress={onSelectStage} />
+        ))}
+
         {others.map((m) => (
           <AvatarMarker
             key={`${m.user_id}-${m.avatar_url ?? "none"}`}
@@ -180,24 +264,58 @@ export default function MapScreen({
         />
       </MapView>
 
+      {selectedStage && (
+        <StageBubble
+          // Remount per stage so the pop-in animation replays on each new tap.
+          key={selectedStage.landmark.id}
+          selection={selectedStage}
+        />
+      )}
+
       {/* Nothing to show without a group — the centre overlay is what prompts
           joining one. */}
       {group && (
-        <Pressable style={[styles.headerPill, { top: insets.top + 12 }]} onPress={onOpenGroups}>
-          <Ionicons name="people" size={14} color="#8b8bf5" />
-          <Text style={styles.headerGroup} numberOfLines={1}>
-            {group.name}
-          </Text>
-          {liveness.event && (
-            <>
-              <View style={styles.headerDivider} />
-              <Ionicons name="location" size={14} color="#8b8bf5" />
-              <Text style={styles.headerGroup} numberOfLines={1}>
-                {liveness.event.name}
-              </Text>
-            </>
-          )}
-        </Pressable>
+        <View style={[styles.headerStack, { top: insets.top + 12 }]} pointerEvents="box-none">
+          <Pressable style={styles.headerPill} onPress={onOpenGroups}>
+            <Ionicons name="people" size={14} color="#8b8bf5" />
+            <Text style={styles.headerGroup} numberOfLines={1}>
+              {group.name}
+            </Text>
+            {liveness.event && (
+              <>
+                <View style={styles.headerDivider} />
+                <Ionicons name="location" size={14} color="#8b8bf5" />
+                <Text style={styles.headerGroup} numberOfLines={1}>
+                  {liveness.event.name}
+                </Text>
+              </>
+            )}
+          </Pressable>
+
+          {/* One pill per landmark geofence the user is standing in. When the
+              event is live and it's a stage, the set currently on shows next to
+              the stage name. */}
+          {insideLandmarks.map((l) => {
+            const playing =
+              live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
+            return (
+              <View key={l.id} style={styles.landmarkPill}>
+                <Ionicons name={LANDMARK_ICONS[l.kind] ?? "location"} size={13} color="#5eead4" />
+                <Text style={styles.landmarkPillText} numberOfLines={1}>
+                  {l.name}
+                </Text>
+                {playing && (
+                  <>
+                    <View style={styles.headerDivider} />
+                    <Text style={styles.landmarkPillArtist} numberOfLines={1}>
+                      {playing.artist}
+                    </Text>
+                  </>
+                )}
+              </View>
+            );
+          })}
+        </View>
       )}
 
       {(liveness.status === "none" || liveness.status === "ended") && (
@@ -286,6 +404,123 @@ function AvatarMarker({
         )}
       </View>
     </Marker>
+  );
+}
+
+// What a live stage's tap bubble says: a heading ("Now playing" / "Up next" /
+// "No sets scheduled") and the artist, or null when there's no set to name.
+type StageCallout = { heading: string; artist: string | null };
+
+// An open stage bubble: the stage and its resolved copy, plus the screen-pixel
+// anchor (the pin's centre) the overlay is positioned against.
+type SelectedStage = { landmark: Landmark; callout: StageCallout; x: number; y: number };
+
+// The bubble copy for a stage at time `now`: who's on, else who's next, else a
+// no-schedule note. Module-level so the marker press handler can call it with
+// the latest schedule without re-creating the closure.
+function stageCalloutFor(sets: EventSet[], landmarkId: string, now: number): StageCallout {
+  const current = currentSetForLandmark(sets, landmarkId, now);
+  if (current) return { heading: "Now playing", artist: current.artist };
+  const next = upcomingSetForLandmark(sets, landmarkId, now);
+  if (next) return { heading: "Up next", artist: next.artist };
+  return { heading: "No sets scheduled", artist: null };
+}
+
+// A small labelled pin for an event landmark. Content is all synchronous
+// (icon font + text), so no tracksViewChanges dance like AvatarMarker needs
+// for its remote images. zIndex sits below member avatars. Tapping it calls
+// `onPress`; the parent decides whether that stage opens a bubble.
+function LandmarkMarker({
+  landmark,
+  onPress,
+}: {
+  landmark: Landmark;
+  onPress: (landmark: Landmark) => void;
+}) {
+  const icon = LANDMARK_ICONS[landmark.kind] ?? "location";
+  // Medical stands out in red; everything else shares the teal landmark accent,
+  // distinct from members (orange) and self (indigo).
+  const color = landmark.kind === "medical" ? "#ef4444" : "#14b8a6";
+
+  return (
+    <Marker
+      coordinate={{ latitude: landmark.lat, longitude: landmark.lng }}
+      anchor={{ x: 0.5, y: 0.5 }}
+      tracksViewChanges={false}
+      zIndex={0}
+      onPress={() => onPress(landmark)}
+    >
+      <View style={styles.landmarkWrap}>
+        <View style={[styles.landmarkBadge, { backgroundColor: color }]}>
+          <Ionicons name={icon} size={15} color="#fff" />
+        </View>
+        <Text style={styles.landmarkLabel} numberOfLines={1}>
+          {landmark.name}
+        </Text>
+      </View>
+    </Marker>
+  );
+}
+
+// The stage info bubble, drawn as a screen overlay rather than a native Callout.
+// It starts invisible, measures itself once, then fades+scales in above the pin
+// — so there's no unpositioned flash and no fight with the map's re-renders.
+const BUBBLE_GAP = 16; // px between the pin centre and the bubble's bottom edge
+
+function StageBubble({ selection }: { selection: SelectedStage }) {
+  const { landmark, callout, x, y } = selection;
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const anim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (!size) return;
+    Animated.timing(anim, {
+      toValue: 1,
+      duration: 140,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [size, anim]);
+
+  // Anchor bottom-centre of the bubble just above the pin. Until measured it
+  // sits at the raw point but stays invisible, so the reposition never shows.
+  const left = size ? x - size.width / 2 : x;
+  const top = size ? y - size.height - BUBBLE_GAP : y;
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      <Animated.View
+        onLayout={(e) => {
+          if (!size) {
+            const { width, height } = e.nativeEvent.layout;
+            setSize({ width, height });
+          }
+        }}
+        style={[
+          styles.calloutBubble,
+          {
+            position: "absolute",
+            left,
+            top,
+            opacity: size ? anim : 0,
+            transform: [
+              { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
+              { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) },
+            ],
+          },
+        ]}
+      >
+        <Text style={styles.calloutStage} numberOfLines={1}>
+          {landmark.name}
+        </Text>
+        <Text style={styles.calloutHeading}>{callout.heading}</Text>
+        {callout.artist && (
+          <Text style={styles.calloutArtist} numberOfLines={2}>
+            {callout.artist}
+          </Text>
+        )}
+      </Animated.View>
+    </View>
   );
 }
 
@@ -378,6 +613,60 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(255, 255, 255, 0.9)",
     textShadowRadius: 3,
   },
+  landmarkWrap: {
+    alignItems: "center",
+  },
+  landmarkBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "rgba(255, 255, 255, 0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // Matches the event label's bare map-style treatment — a light halo keeps it
+  // legible over the muted map.
+  landmarkLabel: {
+    maxWidth: 120,
+    textAlign: "center",
+    color: "#0f766e",
+    fontSize: 11,
+    fontWeight: "700",
+    marginTop: 2,
+    textShadowColor: "rgba(255, 255, 255, 0.9)",
+    textShadowRadius: 3,
+  },
+  // Tooltip-style callout (no default OS bubble), matching the app's dark
+  // surface palette. Width-bounded so long artist names wrap instead of
+  // stretching the map.
+  calloutBubble: {
+    backgroundColor: "#1c1c22",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#2a2a32",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    maxWidth: 200,
+    gap: 2,
+  },
+  calloutStage: {
+    color: "#5eead4",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  calloutHeading: {
+    color: "#9a9aa5",
+    fontSize: 11,
+    fontWeight: "600",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  calloutArtist: {
+    color: "#fff",
+    fontSize: 15,
+    fontWeight: "700",
+  },
   memberLabel: {
     maxWidth: 110,
     backgroundColor: "rgba(16, 16, 20, 0.85)",
@@ -391,9 +680,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
-  headerPill: {
+  headerStack: {
     position: "absolute",
     alignSelf: "center",
+    alignItems: "center",
+    gap: 6,
+    maxWidth: "92%",
+  },
+  headerPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
@@ -401,7 +695,31 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
-    maxWidth: "92%",
+    maxWidth: "100%",
+  },
+  // Teal accent ties it to the landmark pins; sits directly under the group pill.
+  landmarkPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "rgba(16, 16, 20, 0.85)",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    maxWidth: "100%",
+  },
+  landmarkPillText: {
+    color: "#5eead4",
+    fontSize: 13,
+    fontWeight: "600",
+    flexShrink: 1,
+  },
+  // The now-playing artist, brighter than the stage name it sits beside.
+  landmarkPillArtist: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
+    flexShrink: 1,
   },
   headerDivider: {
     width: 1,

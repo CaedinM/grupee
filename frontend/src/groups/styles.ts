@@ -226,16 +226,22 @@ export const styles = StyleSheet.create({
     fontSize: 16,
     flexShrink: 1,
   },
-  roleBadge: {
-    backgroundColor: "rgba(91, 91, 240, 0.2)",
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  // Pushed to the right edge of the row; teal ties it to the landmark pins/pill
+  // on the map. flexShrink lets a long landmark name truncate rather than shove
+  // the member's name.
+  memberLandmark: {
+    marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    flexShrink: 1,
+    paddingLeft: 8,
   },
-  roleBadgeText: {
-    color: "#8b8bf5",
-    fontSize: 12,
+  memberLandmarkText: {
+    color: "#5eead4",
+    fontSize: 13,
     fontWeight: "600",
+    flexShrink: 1,
   },
   leaveButton: {
     marginTop: "auto",

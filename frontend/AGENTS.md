@@ -81,10 +81,55 @@ Cross-file invariants that matter when changing things:
 - **Platform split via filename**: `MapScreen.web.tsx` shadows `MapScreen.tsx` on web
   because `react-native-maps` has no web support, so web renders a telemetry list instead.
   A change to the map screen's props or empty states needs applying to both files.
+- **Event-specific map overlays are gated on group membership.** The geofence boundary
+  (from `liveness.event.boundary`) and the landmarks (from `useEventLandmarks`, which calls
+  `listLandmarks(event_id)`) render only when the user is in a group and only for that
+  group's own event — a groupless user or a group with no `event_id` sees neither. Both are
+  shown regardless of liveness status (upcoming/live/ended) because they're wayfinding, not
+  live position. Landmark pins are keyed by kind through `LANDMARK_ICONS` in `MapScreen.tsx`;
+  the web variant lists them as telemetry rows. Keep both variants in step.
+- **A landmark can carry its own geofence** (`Landmark.boundary`, a [lat, lng] polygon).
+  When the user's position falls inside one, its name shows in a teal pill stacked under the
+  group/event header pill (`headerStack` in `MapScreen.tsx`); the web variant surfaces the
+  same as a "You're at:" telemetry line. `GroupView` reuses the same test to tag each
+  member row with the landmark they're standing in (right-aligned, teal), joining
+  `useGroupLocations` positions against `useEventLandmarks`. The containment test is shared:
+  `pointInPolygon` / `landmarksContaining` in `src/geo.ts`, used by both map variants and the
+  groups list — put any new map geometry there rather than inlining it in one file.
+- **A stage pill shows who's playing while the event is live.** `useEventSets` (same
+  event-scoped, group-gated fetch as `useEventLandmarks`, calling `listSets(event_id)`)
+  supplies the schedule; `currentSetForLandmark(sets, landmarkId, now)` in `src/useEventSets.ts`
+  picks the set whose half-open `[start, end)` window contains `now`. It's fetched only while
+  liveness is `"live"` and rendered only for `kind === "stage"` landmarks the user is standing
+  in: the native map appends the artist after the stage name in the landmark pill, the web
+  variant appends it in parentheses on the "You're at:" line. `now` is re-read each render (the
+  live location fix re-renders far finer than set boundaries need) — there's no separate tick.
+- **Live stage pins are tappable (native map only).** Tapping any `LandmarkMarker` calls
+  `onSelectStage`; for a `kind === "stage"` pin while liveness is `"live"` it opens an info
+  bubble (current set's artist "Now playing", else next via `upcomingSetForLandmark` "Up next",
+  else "No sets scheduled" — resolved by `stageCalloutFor`), any other pin just closes an open
+  one. The bubble is NOT a native `Callout` — that flashed its custom content before animating
+  and fought the ~1.5s location re-render. Instead `StageBubble` is a self-managed screen
+  overlay: the press handler resolves the pin's pixel anchor via `mapRef.pointForCoordinate`,
+  the bubble measures itself once while invisible, then fades/scales in above the pin, and it's
+  dismissed instantly by the `MapView`'s `onPress`/`onPanDrag` (and on recenter / liveness or
+  event change). The press handler reads live/sets from `stageDataRef` so it stays a stable
+  callback. The web variant has no map, so there's nothing to mirror there.
 - **Poll intervals are deliberate and live next to their hook**: location PUT 1.5s and
   group locations GET 2s (the backend's hot paths), group members 5s, event refetch 60s,
-  liveness re-evaluation tick 30s. Polling loops guard with an `inFlight` flag and a
+  landmark refetch 60s and set refetch 60s (cold data — the interval is really the
+  error-retry loop), liveness re-evaluation tick 30s. Polling loops guard with an `inFlight` flag and a
   `cancelled` flag in the cleanup; copy that shape rather than inventing a new one.
+- **Cold, admin-authored data is cached on device, cache-first.** `useEventLiveness`,
+  `useEventLandmarks`, and `useEventSets` fetch through `useCachedResource` (`src/useCachedResource.ts`),
+  which renders the last-persisted value from AsyncStorage immediately (so the geofence, pins,
+  and schedule show on a cold or offline open) then revalidates on the 60s loop above and
+  re-persists. Keys are namespaced by event id (`wta.event.<id>`, `wta.landmarks.<id>`,
+  `wta.sets.<id>`); passing a null key stands the whole thing down (no cache read, fetch, or
+  interval), which is how the event-id gating still works. The hot paths (location PUT, group
+  locations GET) are deliberately NOT cached — they're live per-user data. `ProfileGate`'s
+  profile load in `App.tsx` predates this helper and stays hand-rolled (it interleaves a
+  name-screen fallback), but new cold resources should use `useCachedResource`.
 - **Avatars come back in two forms** — absolute URLs from S3, host-relative paths from
   local-disk dev storage. Always render them through `avatarUri` / `avatarSource`, which
   normalize both.

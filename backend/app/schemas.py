@@ -4,7 +4,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-LandmarkKind = Literal["stage", "food", "drinks", "medical", "restroom", "exit", "meetup", "other"]
+LandmarkKind = Literal[
+    "stage", "entrance", "exit", "restroom", "food", "drinks", "medical", "meetup", "other"
+]
+
+# Only stages are individually named ("Bassrush Arena"); every other kind is
+# generic, so the server supplies the label rather than making clients invent one.
+DEFAULT_LANDMARK_NAMES: dict[str, str] = {
+    "entrance": "Entrance",
+    "exit": "Exit",
+    "restroom": "Restrooms",
+    "food": "Food",
+    "drinks": "Drinks",
+    "medical": "Medical",
+    "meetup": "Meetup point",
+    "other": "Landmark",
+}
 
 
 # ---------- Users ----------
@@ -205,10 +220,29 @@ class BoundaryOut(BaseModel):
 
 
 class LandmarkCreate(BaseModel):
-    name: str = Field(min_length=1)
     kind: LandmarkKind
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
+    # Required for stages, ignored for the generic kinds (see DEFAULT_LANDMARK_NAMES).
+    name: str | None = None
+    # Optional geofence for the landmark, validated the same way as events.boundary.
+    boundary: list[LatLng] | None = None
+
+    @field_validator("boundary")
+    @classmethod
+    def check_boundary(cls, v: list[LatLng] | None) -> list[LatLng] | None:
+        return None if v is None else _validate_points(v)
+
+    @model_validator(mode="after")
+    def resolve_name(self) -> "LandmarkCreate":
+        cleaned = (self.name or "").strip()
+        if self.kind == "stage":
+            if not cleaned:
+                raise ValueError("a stage needs a name")
+            self.name = cleaned
+        else:
+            self.name = cleaned or DEFAULT_LANDMARK_NAMES[self.kind]
+        return self
 
 
 class LandmarkOut(BaseModel):
@@ -220,9 +254,56 @@ class LandmarkOut(BaseModel):
     kind: str
     lat: float
     lng: float
+    boundary: list[LatLng] | None
     created_at: datetime
 
 
 class MapOut(BaseModel):
     boundary: list[LatLng] | None
     landmarks: list[LandmarkOut]
+
+
+# ---------- Sets (performance schedule) ----------
+
+class SetBase(BaseModel):
+    artist: str = Field(min_length=1)
+    start_time: datetime
+    end_time: datetime
+    # The stage this set is on. Optional so a set can be scheduled before its
+    # stage exists; the router checks it belongs to the event and is a stage.
+    landmark_id: str | None = None
+
+    @field_validator("artist")
+    @classmethod
+    def _clean_artist(cls, v: str) -> str:
+        # min_length alone lets "   " through.
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("artist must not be blank")
+        return cleaned
+
+    @model_validator(mode="after")
+    def check_window(self) -> "SetBase":
+        if self.end_time <= self.start_time:
+            raise ValueError("end_time must be after start_time")
+        return self
+
+
+class SetCreate(SetBase):
+    """POST /events/{id}/sets — event_id comes from the path, not the body."""
+
+
+class SetUpdate(SetBase):
+    """PUT /events/{id}/sets/{set_id} — full replacement of the same fields."""
+
+
+class SetOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    event_id: str
+    landmark_id: str | None
+    artist: str
+    start_time: datetime
+    end_time: datetime
+    created_at: datetime

@@ -125,6 +125,8 @@ export default function GroupsScreen({
         />
       );
     case "group":
-      return <GroupView user={user} group={mode.group} onLeft={toChooser} />;
+      return (
+        <GroupView user={user} group={mode.group} liveness={liveness} onLeft={toChooser} />
+      );
   }
 }

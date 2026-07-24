@@ -115,6 +115,9 @@ class Event(Base):
     landmarks: Mapped[list["Landmark"]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
     )
+    sets: Mapped[list["Set"]] = relationship(
+        back_populates="event", cascade="all, delete-orphan"
+    )
 
 
 class Landmark(Base):
@@ -128,9 +131,41 @@ class Landmark(Base):
     kind: Mapped[str] = mapped_column(String, nullable=False)
     lat: Mapped[float] = mapped_column(Float, nullable=False)
     lng: Mapped[float] = mapped_column(Float, nullable=False)
+    # Optional geofence for the landmark itself, stored the same way as
+    # events.boundary — a polygon of [lat, lng] vertices, or NULL for none.
+    boundary: Mapped[list | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, nullable=False)
 
     event: Mapped[Event] = relationship(back_populates="landmarks")
+    sets: Mapped[list["Set"]] = relationship(
+        back_populates="landmark", passive_deletes=True
+    )
+
+
+class Set(Base):
+    """One artist's performance slot: who plays which stage, and when.
+
+    Tied to an event, and (usually) to a landmark of kind "stage". Deleting the
+    event cascades its sets away; deleting a stage only unlinks it (landmark_id
+    goes NULL) so the schedule survives a landmark being moved or re-added.
+    """
+
+    __tablename__ = "sets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    event_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    landmark_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("landmarks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    artist: Mapped[str] = mapped_column(String, nullable=False)
+    start_time: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
+    end_time: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, nullable=False)
+
+    event: Mapped[Event] = relationship(back_populates="sets")
+    landmark: Mapped["Landmark | None"] = relationship(back_populates="sets")
 
 
 class Group(Base):

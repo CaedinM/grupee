@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { ApiError, getMe, listEvents, type AdminUser, type FestivalEvent } from "./api";
 import CreateEvent from "./CreateEvent";
+import EventDashboard from "./EventDashboard";
+import EventSets from "./EventSets";
 
 export default function App() {
   return (
@@ -140,6 +142,13 @@ function AdminGate() {
   );
 }
 
+type View =
+  | { kind: "list" }
+  | { kind: "dashboard"; event: FestivalEvent }
+  | { kind: "sets"; event: FestivalEvent }
+  | { kind: "create" }
+  | { kind: "edit"; event: FestivalEvent };
+
 function Shell({
   user,
   email,
@@ -151,8 +160,8 @@ function Shell({
   getToken: () => Promise<string | null>;
   onSignOut: () => void;
 }) {
-  // null = event list; { event: undefined } = create; { event } = edit.
-  const [editor, setEditor] = useState<{ event?: FestivalEvent } | null>(null);
+  // What's on screen: the list, an event's dashboard, or the create/edit form.
+  const [view, setView] = useState<View>({ kind: "list" });
   const [events, setEvents] = useState<FestivalEvent[] | null>(null);
   const [eventsError, setEventsError] = useState<string | null>(null);
   // Re-tick so an event moves between Live/Upcoming/Past while the page sits open.
@@ -178,17 +187,59 @@ function Shell({
     refreshEvents();
   }, [refreshEvents]);
 
-  if (editor) {
+  if (view.kind === "create" || view.kind === "edit") {
+    const editing = view.kind === "edit" ? view.event : undefined;
     return (
       <CreateEvent
         getToken={getToken}
-        initial={editor.event}
-        onCancel={() => setEditor(null)}
-        onCreated={() => {
-          setEditor(null);
+        initial={editing}
+        // Cancelling an edit returns to that event's dashboard; a create returns to the list.
+        onCancel={() => setView(editing ? { kind: "dashboard", event: editing } : { kind: "list" })}
+        onCreated={(saved) => {
+          setView(editing ? { kind: "dashboard", event: saved } : { kind: "list" });
           refreshEvents();
         }}
       />
+    );
+  }
+
+  if (view.kind === "dashboard" || view.kind === "sets") {
+    const topbar = (
+      <header className="topbar">
+        <div className="topbar-brand">
+          <h1 className="wordmark">WhereTheyAt?</h1>
+          <span className="ops-badge">OPS</span>
+        </div>
+        <div className="topbar-user">
+          <span>{email ?? user.display_name}</span>
+          <button className="ghost" onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      </header>
+    );
+    if (view.kind === "sets") {
+      return (
+        <>
+          {topbar}
+          <EventSets
+            event={view.event}
+            getToken={getToken}
+            onBack={() => setView({ kind: "dashboard", event: view.event })}
+          />
+        </>
+      );
+    }
+    return (
+      <>
+        {topbar}
+        <EventDashboard
+          event={view.event}
+          onEdit={() => setView({ kind: "edit", event: view.event })}
+          onManageSets={() => setView({ kind: "sets", event: view.event })}
+          onBack={() => setView({ kind: "list" })}
+        />
+      </>
     );
   }
 
@@ -210,7 +261,7 @@ function Shell({
         <div className="home-header">
           <p className="status-tag">ADMIN · {user.display_name.toUpperCase()}</p>
           <h2>Events</h2>
-          <button className="primary" onClick={() => setEditor({})}>
+          <button className="primary" onClick={() => setView({ kind: "create" })}>
             Create New Event
           </button>
         </div>
@@ -227,16 +278,22 @@ function Shell({
               </h3>
               <ul className="event-list">
                 {group.map((event) => (
-                  <li key={event.id} className="event-row">
-                    <div className="event-row-main">
-                      <span className="event-name">{event.name}</span>
-                      <span className="event-dates">{formatSchedule(event)}</span>
-                    </div>
-                    <span className="event-fence">
-                      {event.boundary ? `${event.boundary.length}-point geofence` : "no geofence"}
-                    </span>
-                    <button className="ghost" onClick={() => setEditor({ event })}>
-                      Edit
+                  <li key={event.id}>
+                    <button
+                      type="button"
+                      className="event-row"
+                      onClick={() => setView({ kind: "dashboard", event })}
+                    >
+                      <div className="event-row-main">
+                        <span className="event-name">{event.name}</span>
+                        <span className="event-dates">{formatSchedule(event)}</span>
+                      </div>
+                      <span className="event-fence">
+                        {event.boundary ? `${event.boundary.length}-point geofence` : "no geofence"}
+                      </span>
+                      <span className="event-row-chevron" aria-hidden="true">
+                        ›
+                      </span>
                     </button>
                   </li>
                 ))}

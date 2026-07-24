@@ -3,6 +3,9 @@
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 import type { Group, User } from "./api";
+import { landmarksContaining } from "./geo";
+import { useEventLandmarks } from "./useEventLandmarks";
+import { currentSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
 import { useGroupLocations } from "./useGroupLocations";
 import type { LocationReporting } from "./useLocationReporting";
@@ -34,6 +37,18 @@ export default function MapScreen({
   const live = liveness.status === "live";
   // No polling outside a live event — matches the reporting side in App.tsx.
   const { members, error: groupError } = useGroupLocations(live ? (group?.id ?? null) : null);
+  // Same gating as the native map: only the active group's event landmarks.
+  const landmarks = useEventLandmarks(group?.event_id ?? null);
+  // The native map shows these as a pill under the group/event header; here
+  // they surface as a telemetry line.
+  const insideLandmarks = landmarksContaining(
+    landmarks,
+    lastAck ? { latitude: lastAck.lat, longitude: lastAck.lng } : null
+  );
+  // Only meaningful while live; the native map shows this artist next to the
+  // stage name in the landmark pill, here it's appended to the "You're at:" line.
+  const sets = useEventSets(live ? (group?.event_id ?? null) : null);
+  const now = Date.now();
 
   return (
     <View style={styles.card}>
@@ -100,6 +115,27 @@ export default function MapScreen({
                   : "no location yet"
               }
             />
+          ))}
+        </View>
+      )}
+
+      {insideLandmarks.length > 0 && (
+        <Text style={styles.subtitle}>
+          You're at:{" "}
+          {insideLandmarks
+            .map((l) => {
+              const playing =
+                live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
+              return playing ? `${l.name} (${playing.artist})` : l.name;
+            })
+            .join(", ")}
+        </Text>
+      )}
+
+      {group && landmarks.length > 0 && (
+        <View style={styles.stats}>
+          {landmarks.map((l) => (
+            <Stat key={l.id} label={l.name} value={`${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}`} />
           ))}
         </View>
       )}

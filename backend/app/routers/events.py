@@ -112,7 +112,12 @@ def add_landmark(
     event = get_event_or_404(db, event_id)
     check_event_admin(event, user)
     landmark = models.Landmark(
-        event_id=event_id, name=body.name, kind=body.kind, lat=body.lat, lng=body.lng
+        event_id=event_id,
+        name=body.name,
+        kind=body.kind,
+        lat=body.lat,
+        lng=body.lng,
+        boundary=body.boundary,
     )
     db.add(landmark)
     db.commit()
@@ -145,4 +150,92 @@ def delete_landmark(
     if landmark is None or landmark.event_id != event_id:
         raise HTTPException(status_code=404, detail="Landmark not found")
     db.delete(landmark)
+    db.commit()
+
+
+def _resolve_set_landmark(db: Session, event_id: str, landmark_id: str | None) -> str | None:
+    """A set's stage must be a `stage` landmark of the same event (or None).
+    Rejecting cross-event or non-stage references keeps the schedule coherent."""
+    if landmark_id is None:
+        return None
+    landmark = db.get(models.Landmark, landmark_id)
+    if landmark is None or landmark.event_id != event_id:
+        raise HTTPException(status_code=400, detail="landmark_id does not belong to this event")
+    if landmark.kind != "stage":
+        raise HTTPException(status_code=400, detail="a set can only be tied to a stage landmark")
+    return landmark_id
+
+
+@router.post(
+    "/{event_id}/sets", response_model=schemas.SetOut, status_code=status.HTTP_201_CREATED
+)
+def add_set(
+    event_id: str,
+    body: schemas.SetCreate,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    event = get_event_or_404(db, event_id)
+    check_event_admin(event, user)
+    performance = models.Set(
+        event_id=event_id,
+        landmark_id=_resolve_set_landmark(db, event_id, body.landmark_id),
+        artist=body.artist,
+        start_time=body.start_time,
+        end_time=body.end_time,
+    )
+    db.add(performance)
+    db.commit()
+    db.refresh(performance)
+    return performance
+
+
+@router.get("/{event_id}/sets", response_model=list[schemas.SetOut])
+def list_sets(
+    event_id: str, _: str = Depends(get_clerk_id), db: Session = Depends(get_db)
+):
+    get_event_or_404(db, event_id)
+    return db.execute(
+        select(models.Set)
+        .where(models.Set.event_id == event_id)
+        .order_by(models.Set.start_time)
+    ).scalars().all()
+
+
+@router.put("/{event_id}/sets/{set_id}", response_model=schemas.SetOut)
+def update_set(
+    event_id: str,
+    set_id: str,
+    body: schemas.SetUpdate,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Full replacement of the editable fields (PUT semantics)."""
+    event = get_event_or_404(db, event_id)
+    check_event_admin(event, user)
+    performance = db.get(models.Set, set_id)
+    if performance is None or performance.event_id != event_id:
+        raise HTTPException(status_code=404, detail="Set not found")
+    performance.landmark_id = _resolve_set_landmark(db, event_id, body.landmark_id)
+    performance.artist = body.artist
+    performance.start_time = body.start_time
+    performance.end_time = body.end_time
+    db.commit()
+    db.refresh(performance)
+    return performance
+
+
+@router.delete("/{event_id}/sets/{set_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_set(
+    event_id: str,
+    set_id: str,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    event = get_event_or_404(db, event_id)
+    check_event_admin(event, user)
+    performance = db.get(models.Set, set_id)
+    if performance is None or performance.event_id != event_id:
+        raise HTTPException(status_code=404, detail="Set not found")
+    db.delete(performance)
     db.commit()

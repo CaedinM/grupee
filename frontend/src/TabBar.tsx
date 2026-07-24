@@ -2,10 +2,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-export type Tab = "groups" | "map" | "profile";
+export type Tab = "groups" | "event" | "map" | "profile";
 
 const TABS: { key: Tab; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: "groups", label: "My Group", icon: "people" },
+  { key: "event", label: "My Event", icon: "calendar" },
   { key: "map", label: "Map", icon: "map" },
   { key: "profile", label: "Profile", icon: "person-circle" },
 ];

@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   avatarSource,
@@ -38,17 +39,65 @@ export default function ProfileScreen({
   onUserChange: (user: User) => void;
   onReset: () => void;
 }) {
-  const sharing = reporting.permission === "granted" && reporting.sentCount > 0;
   const [error, setError] = useState<string | null>(null);
-  // The Clerk account behind this profile — for showing the signed-in email.
-  const { user: account } = useUser();
+  // The account page and its settings live on one screen; a gear in the top
+  // right swaps between them rather than adding another entry to the tab bar.
+  const [showSettings, setShowSettings] = useState(false);
+  const insets = useSafeAreaInsets();
+
+  if (showSettings) {
+    return (
+      <SettingsScreen
+        user={user}
+        reporting={reporting}
+        onReset={onReset}
+        onBack={() => setShowSettings(false)}
+      />
+    );
+  }
 
   return (
     <View style={styles.container}>
+      <Pressable
+        style={[styles.settingsButton, { top: insets.top + 12 }]}
+        onPress={() => setShowSettings(true)}
+        hitSlop={8}
+      >
+        <Ionicons name="settings-outline" size={24} color="#c5c5cf" />
+      </Pressable>
+
       <Avatar user={user} onUserChange={onUserChange} onError={setError} />
       <DisplayName user={user} onUserChange={onUserChange} onError={setError} />
 
       {error && <Text style={styles.error}>{error}</Text>}
+    </View>
+  );
+}
+
+function SettingsScreen({
+  user,
+  reporting,
+  onReset,
+  onBack,
+}: {
+  user: User;
+  reporting: LocationReporting;
+  onReset: () => void;
+  onBack: () => void;
+}) {
+  const sharing = reporting.permission === "granted" && reporting.sentCount > 0;
+  // The Clerk account behind this profile — for showing the signed-in email.
+  const { user: account } = useUser();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View style={[styles.settingsContainer, { paddingTop: insets.top + 12 }]}>
+      <View style={styles.header}>
+        <Pressable style={styles.backButton} onPress={onBack} hitSlop={8}>
+          <Ionicons name="chevron-back" size={26} color="#fff" />
+        </Pressable>
+        <Text style={styles.headerTitle}>Settings</Text>
+      </View>
 
       <View style={styles.rows}>
         <Row
@@ -270,6 +319,32 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
     padding: 24,
+  },
+  settingsButton: {
+    position: "absolute",
+    right: 20,
+    padding: 4,
+    zIndex: 1,
+  },
+  settingsContainer: {
+    flex: 1,
+    backgroundColor: "#101014",
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    gap: 20,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  backButton: {
+    marginLeft: -6,
+  },
+  headerTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#fff",
   },
   avatarBlock: {
     alignItems: "center",

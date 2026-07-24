@@ -25,6 +25,7 @@ import {
 import AuthScreen from "./src/AuthScreen";
 import GroupsScreen from "./src/groups/GroupsScreen";
 import MapScreen from "./src/MapScreen";
+import MyEventScreen from "./src/MyEventScreen";
 import ProfileScreen from "./src/ProfileScreen";
 import TabBar, { type Tab } from "./src/TabBar";
 import { useEventLiveness } from "./src/useEventLiveness";
@@ -156,6 +157,9 @@ function SignedInApp({
     <View style={styles.container}>
       <View style={[styles.screen, tab !== "groups" && styles.hidden]}>
         <GroupsScreen user={user} liveness={liveness} onGroupChange={setActiveGroup} />
+      </View>
+      <View style={[styles.screen, tab !== "event" && styles.hidden]}>
+        <MyEventScreen liveness={liveness} />
       </View>
       <View style={[styles.screen, tab !== "map" && styles.hidden]}>
         <MapScreen

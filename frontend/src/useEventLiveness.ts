@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { getEvent, type FestivalEvent, type Group } from "./api";
+import { useCachedResource } from "./useCachedResource";
 
 // Refetch keeps admin edits to the schedule flowing in; the tick re-evaluates
 // liveness so the map flips over the moment the event starts or ends.
@@ -31,27 +32,16 @@ export interface EventLiveness {
  */
 export function useEventLiveness(group: Group | null): EventLiveness {
   const eventId = group?.event_id ?? null;
-  const [event, setEvent] = useState<FestivalEvent | null>(null);
+  // Cache-first via useCachedResource: a cached event resolves liveness (and
+  // the map's geofence) instantly on a cold open instead of stalling on
+  // "loading" until the network answers; the 60s refetch corrects a stale
+  // schedule, and the 30s tick below flips the status at start/end.
+  const { value: event } = useCachedResource(
+    eventId ? `wta.event.${eventId}` : null,
+    () => getEvent(eventId!),
+    REFETCH_INTERVAL_MS
+  );
   const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    setEvent(null);
-    if (!eventId) return;
-    let cancelled = false;
-    const load = () =>
-      getEvent(eventId)
-        .then((e) => {
-          if (!cancelled) setEvent(e);
-        })
-        // Leave `event` as-is; the interval doubles as the retry loop.
-        .catch(() => {});
-    load();
-    const timer = setInterval(load, REFETCH_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [eventId]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), TICK_INTERVAL_MS);

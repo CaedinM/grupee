@@ -336,10 +336,27 @@ button.primary:hover {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  width: 100%;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px 18px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.event-row:hover {
+  border-color: var(--accent-soft);
+  background: #22222a;
+}
+
+.event-row-chevron {
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
 }
 
 .event-row-main {
@@ -364,6 +381,63 @@ button.primary:hover {
   font-size: 12px;
   color: var(--accent-soft);
   white-space: nowrap;
+}
+
+/* ---- Event dashboard ---- */
+
+.dashboard {
+  flex: 1;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.dashboard-back {
+  align-self: flex-start;
+}
+
+.dashboard-header h2 {
+  margin: 6px 0 0;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.dashboard-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 22px;
+}
+
+.dashboard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dashboard-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dashboard-value {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dashboard-actions {
+  display: flex;
+  gap: 12px;
 }
 
 /* ---- Create event: form panel + drawing map ---- */
@@ -406,7 +480,8 @@ button.primary:hover {
   color: var(--muted);
 }
 
-.field input {
+.field input,
+.field select {
   background: var(--panel);
   border: 1px solid var(--line);
   color: var(--text);
@@ -417,7 +492,8 @@ button.primary:hover {
   color-scheme: dark;
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   outline: none;
   border-color: var(--accent);
 }
@@ -474,6 +550,114 @@ button.primary:hover {
   cursor: default;
 }
 
+/* ---- Landmarks ---- */
+
+.landmark-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.landmark-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+}
+
+.landmark-emoji {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.landmark-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.landmark-fence {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+}
+
+.landmark-remove {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.landmark-remove:hover {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.kind-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.kind-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.kind-btn:hover {
+  border-color: var(--accent);
+  background: rgba(91, 91, 240, 0.12);
+}
+
+.kind-emoji {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.placing-hint {
+  color: var(--accent-soft);
+}
+
+/* Emoji pin: divIcon renders bare, so the chrome lives here. */
+.landmark-pin {
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  line-height: 1;
+  border-radius: 50%;
+  background: rgba(16, 16, 20, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+}
+
+.geofence-map.placing .map-canvas.leaflet-container {
+  cursor: copy;
+}
+
 .create-actions {
   margin-top: auto;
   display: flex;
@@ -508,4 +692,196 @@ button.primary:hover {
   right: 12px;
   z-index: 1000; /* above leaflet panes */
   background: rgba(16, 16, 20, 0.85);
+}
+
+/* ---- Event sets: schedule calendar ---- */
+
+.sets {
+  flex: 1;
+  width: 100%;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sets-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cal-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 240px);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+}
+
+.cal {
+  min-width: fit-content;
+}
+
+/* Header row: an empty gutter cell, then one cell per stage column. */
+.cal-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.cal-gutter-head {
+  width: var(--gutter);
+  flex-shrink: 0;
+}
+
+.cal-col-head {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 12px;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  border-left: 1px solid var(--line);
+}
+
+.cal-body {
+  position: relative;
+  display: flex;
+}
+
+.cal-gutter {
+  position: relative;
+  width: var(--gutter);
+  flex-shrink: 0;
+}
+
+.cal-tick-label {
+  position: absolute;
+  right: 8px;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.cal-grid {
+  position: relative;
+  flex: 1;
+}
+
+.cal-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cal-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed var(--line);
+}
+
+.cal-cols {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.cal-col {
+  flex: 1;
+  min-width: 120px;
+  position: relative;
+  border-left: 1px solid var(--line);
+  cursor: copy;
+}
+
+.cal-set {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(91, 91, 240, 0.22);
+  color: var(--text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.cal-set:hover {
+  background: rgba(91, 91, 240, 0.34);
+}
+
+.cal-set-artist {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.15;
+}
+
+.cal-set-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--accent-soft);
+}
+
+/* ---- Modal (set create/edit) ---- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(8, 8, 12, 0.66);
+}
+
+.modal {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.modal h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+button.ghost.danger {
+  margin-left: auto;
+  color: var(--error);
+  border-color: transparent;
+}
+
+button.ghost.danger:hover {
+  border-color: var(--error);
 }

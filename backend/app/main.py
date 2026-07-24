@@ -27,6 +27,7 @@ def ensure_columns() -> None:
     inspector = inspect(engine)
     users = {c["name"] for c in inspector.get_columns("users")}
     events = {c["name"] for c in inspector.get_columns("events")}
+    landmarks = {c["name"] for c in inspector.get_columns("landmarks")}
     with engine.begin() as conn:
         if "clerk_id" not in users:
             conn.execute(text("ALTER TABLE users ADD COLUMN clerk_id VARCHAR"))
@@ -42,6 +43,8 @@ def ensure_columns() -> None:
                 conn.execute(
                     text(f"ALTER TABLE events ADD COLUMN {column} TIMESTAMP WITH TIME ZONE")
                 )
+        if "boundary" not in landmarks:
+            conn.execute(text("ALTER TABLE landmarks ADD COLUMN boundary JSON"))
 
 
 ensure_columns()
