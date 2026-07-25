@@ -1,11 +1,14 @@
 import { useUser } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   Image,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -22,6 +25,16 @@ import {
   type PickedImage,
   type User,
 } from "./api";
+import { useTabBarClearance } from "./TabBar";
+import {
+  GlassButton,
+  GlassCard,
+  GlassSurface,
+  PulseDot,
+  Reveal,
+  usePressScale,
+} from "./ui/Glass";
+import { color, font, glass, radius, ramp, shadow, space, type } from "./ui/theme";
 import type { LocationReporting } from "./useLocationReporting";
 
 // The backend only stores these three; asking the picker to crop and re-encode
@@ -44,6 +57,7 @@ export default function ProfileScreen({
   // right swaps between them rather than adding another entry to the tab bar.
   const [showSettings, setShowSettings] = useState(false);
   const insets = useSafeAreaInsets();
+  const clearance = useTabBarClearance();
 
   if (showSettings) {
     return (
@@ -56,21 +70,71 @@ export default function ProfileScreen({
     );
   }
 
+  const live = reporting.permission === "granted" && reporting.sentCount > 0;
+
   return (
-    <View style={styles.container}>
-      <Pressable
-        style={[styles.settingsButton, { top: insets.top + 12 }]}
-        onPress={() => setShowSettings(true)}
-        hitSlop={8}
-      >
-        <Ionicons name="settings-outline" size={24} color="#c5c5cf" />
-      </Pressable>
+    <View style={[styles.container, { paddingTop: insets.top + space.md }]}>
+      <View style={styles.topBar}>
+        <Text style={styles.eyebrow}>Your profile</Text>
+        <GlassIconButton icon="settings-outline" onPress={() => setShowSettings(true)} />
+      </View>
 
-      <Avatar user={user} onUserChange={onUserChange} onError={setError} />
-      <DisplayName user={user} onUserChange={onUserChange} onError={setError} />
+      {/* The floating tab bar overlays the bottom of the screen, so the hero
+          centres in what's left of it rather than in the full height. */}
+      <View style={[styles.hero, { paddingBottom: clearance }]}>
+        <Reveal>
+          <Avatar user={user} onUserChange={onUserChange} onError={setError} />
+        </Reveal>
 
-      {error && <Text style={styles.error}>{error}</Text>}
+        <Reveal delay={80} style={styles.identity}>
+          <DisplayName user={user} onUserChange={onUserChange} onError={setError} />
+          <StatusPill live={live} denied={reporting.permission === "denied"} />
+        </Reveal>
+
+        {error && (
+          <Text style={styles.error} numberOfLines={3}>
+            {error}
+          </Text>
+        )}
+      </View>
     </View>
+  );
+}
+
+/** The gear, and the back chevron on settings — a small circular pane. */
+function GlassIconButton({
+  icon,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+}) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.9);
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} hitSlop={10}>
+        <GlassSurface r={radius.pill} intensity={50} style={styles.iconButton}>
+          <View style={styles.iconButtonInner}>
+            <Ionicons name={icon} size={20} color={color.text} />
+          </View>
+        </GlassSurface>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** Whether location is actually reaching the backend, stated plainly. */
+function StatusPill({ live, denied }: { live: boolean; denied: boolean }) {
+  const tone = denied ? color.danger : live ? color.teal : color.textDim;
+  return (
+    <GlassSurface r={radius.pill} intensity={36} sheen={false} style={styles.statusPill}>
+      <View style={styles.statusInner}>
+        {live ? <PulseDot color={color.teal} /> : <View style={[styles.dot, { backgroundColor: tone }]} />}
+        <Text style={[styles.statusText, { color: tone }]}>
+          {denied ? "Location off" : live ? "Sharing location" : "Standing by"}
+        </Text>
+      </View>
+    </GlassSurface>
   );
 }
 
@@ -89,36 +153,75 @@ function SettingsScreen({
   // The Clerk account behind this profile — for showing the signed-in email.
   const { user: account } = useUser();
   const insets = useSafeAreaInsets();
+  const clearance = useTabBarClearance();
 
   return (
-    <View style={[styles.settingsContainer, { paddingTop: insets.top + 12 }]}>
-      <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={onBack} hitSlop={8}>
-          <Ionicons name="chevron-back" size={26} color="#fff" />
-        </Pressable>
-        <Text style={styles.headerTitle}>Settings</Text>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={[
+        styles.settingsContent,
+        { paddingTop: insets.top + space.md, paddingBottom: clearance + space.lg },
+      ]}
+      showsVerticalScrollIndicator={false}
+    >
+      <View style={styles.topBar}>
+        <GlassIconButton icon="chevron-back" onPress={onBack} />
       </View>
 
-      <View style={styles.rows}>
-        <Row
-          label="Location sharing"
-          value={
-            reporting.permission === "denied" ? "Permission denied" : sharing ? "Active" : "Waiting…"
-          }
-        />
-        <Row label="Updates sent" value={String(reporting.sentCount)} />
-        {account?.primaryEmailAddress && (
-          <Row label="Email" value={account.primaryEmailAddress.emailAddress} />
-        )}
-        <Row label="User ID" value={user.id} small />
-        <Row label="API" value={BASE_URL} small />
-      </View>
+      <Reveal>
+        <Text style={styles.eyebrow}>Account</Text>
+        <Text style={type.hero}>Settings</Text>
+      </Reveal>
 
-      <Pressable style={styles.signOut} onPress={onReset}>
-        <Text style={styles.signOutText}>Sign out</Text>
-      </Pressable>
-    </View>
+      <Reveal delay={70}>
+        <Text style={styles.sectionLabel}>Location</Text>
+        <GlassCard>
+          <Row
+            label="Sharing"
+            value={
+              reporting.permission === "denied"
+                ? "Permission denied"
+                : sharing
+                  ? "Active"
+                  : "Waiting…"
+            }
+            tone={
+              reporting.permission === "denied"
+                ? color.danger
+                : sharing
+                  ? color.teal
+                  : color.textDim
+            }
+          />
+          <Divider />
+          <Row label="Updates sent" value={String(reporting.sentCount)} mono />
+        </GlassCard>
+      </Reveal>
+
+      <Reveal delay={130}>
+        <Text style={styles.sectionLabel}>Identity</Text>
+        <GlassCard>
+          {account?.primaryEmailAddress && (
+            <>
+              <Row label="Email" value={account.primaryEmailAddress.emailAddress} />
+              <Divider />
+            </>
+          )}
+          <Row label="User ID" value={user.id} mono small />
+          <Divider />
+          <Row label="API" value={BASE_URL} mono small />
+        </GlassCard>
+      </Reveal>
+
+      <Reveal delay={190}>
+        <GlassButton label="Sign out" variant="glass" onPress={onReset} style={styles.signOut} />
+      </Reveal>
+    </ScrollView>
   );
+}
+
+function Divider() {
+  return <View style={styles.divider} />;
 }
 
 function Avatar({
@@ -132,6 +235,7 @@ function Avatar({
 }) {
   const [busy, setBusy] = useState(false);
   const source = avatarSource(user);
+  const { scale, onPressIn, onPressOut } = usePressScale(0.95);
 
   const pick = async () => {
     onError(null);
@@ -190,22 +294,49 @@ function Avatar({
   // a no-op under react-native-web, and this screen ships on web too.
   return (
     <View style={styles.avatarBlock}>
-      <Pressable style={styles.avatarWrap} onPress={pick} disabled={busy}>
-        {source ? (
-          <Image source={source} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, styles.avatarEmpty]}>
-            <Ionicons name="person" size={44} color="#5b5bf0" />
+      <Animated.View style={{ transform: [{ scale }] }}>
+        <Pressable
+          style={styles.avatarWrap}
+          onPress={pick}
+          onPressIn={onPressIn}
+          onPressOut={onPressOut}
+          disabled={busy}
+        >
+          {/* A soft accent glow, so the avatar reads as the lit object on the
+              screen rather than a hole punched in the glass. */}
+          <View style={styles.avatarGlow} pointerEvents="none" />
+          <View style={styles.avatarRing}>
+            {source ? (
+              <Image source={source} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarEmpty]}>
+                <Ionicons name="person" size={48} color={color.accentSoft} />
+              </View>
+            )}
+            {/* The lens highlight arcing across the top of the sphere. */}
+            <LinearGradient
+              colors={["rgba(255,255,255,0.30)", "rgba(255,255,255,0)"]}
+              start={{ x: 0.2, y: 0 }}
+              end={{ x: 0.7, y: 0.75 }}
+              style={styles.avatarSheen}
+              pointerEvents="none"
+            />
           </View>
-        )}
-        <View style={styles.avatarBadge}>
-          {busy ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <Ionicons name="camera" size={16} color="#fff" />
-          )}
-        </View>
-      </Pressable>
+          <View style={styles.avatarBadge}>
+            <LinearGradient
+              colors={ramp.accent}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            {busy ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <Ionicons name="camera" size={15} color="#fff" />
+            )}
+          </View>
+        </Pressable>
+      </Animated.View>
       {source && (
         <Pressable onPress={remove} disabled={busy} hitSlop={8}>
           <Text style={styles.removeText}>Remove picture</Text>
@@ -262,35 +393,41 @@ function DisplayName({
   if (!editing) {
     return (
       <Pressable style={styles.nameRow} onPress={() => setEditing(true)} hitSlop={8}>
-        <Text style={styles.name}>{user.display_name}</Text>
-        <Ionicons name="pencil" size={18} color="#8b8bf5" />
+        <Text style={styles.name} numberOfLines={2}>
+          {user.display_name}
+        </Text>
+        <View style={styles.pencil}>
+          <Ionicons name="pencil" size={13} color={color.accentSoft} />
+        </View>
       </Pressable>
     );
   }
 
   return (
     <View style={styles.nameEditor}>
-      <TextInput
-        style={styles.input}
-        value={draft}
-        onChangeText={setDraft}
-        placeholder="Your name"
-        placeholderTextColor="#55555f"
-        autoCapitalize="words"
-        autoCorrect={false}
-        autoFocus
-        maxLength={40}
-        selectTextOnFocus
-        onSubmitEditing={save}
-        returnKeyType="done"
-      />
-      <Pressable
-        style={[styles.saveButton, (!draft.trim() || busy) && styles.buttonDisabled]}
+      <GlassSurface r={radius.md} sunken style={styles.nameInputWrap}>
+        <TextInput
+          style={styles.input}
+          value={draft}
+          onChangeText={setDraft}
+          placeholder="Your name"
+          placeholderTextColor={color.textFaint}
+          autoCapitalize="words"
+          autoCorrect={false}
+          autoFocus
+          maxLength={40}
+          selectTextOnFocus
+          onSubmitEditing={save}
+          returnKeyType="done"
+        />
+      </GlassSurface>
+      <GlassButton
+        label="Save"
         onPress={save}
         disabled={!draft.trim() || busy}
-      >
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveText}>Save</Text>}
-      </Pressable>
+        busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+        style={styles.fullWidth}
+      />
       <Pressable style={styles.cancelButton} onPress={cancel} disabled={busy} hitSlop={8}>
         <Text style={styles.cancelText}>Cancel</Text>
       </Pressable>
@@ -298,180 +435,258 @@ function DisplayName({
   );
 }
 
-function Row({ label, value, small }: { label: string; value: string; small?: boolean }) {
+function Row({
+  label,
+  value,
+  small,
+  mono,
+  tone,
+}: {
+  label: string;
+  value: string;
+  small?: boolean;
+  mono?: boolean;
+  tone?: string;
+}) {
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={[styles.rowValue, small && styles.rowValueSmall]} numberOfLines={1}>
+      <Text
+        style={[
+          styles.rowValue,
+          mono && styles.rowValueMono,
+          small && styles.rowValueSmall,
+          tone ? { color: tone } : null,
+        ]}
+        numberOfLines={1}
+      >
         {value}
       </Text>
     </View>
   );
 }
 
-const AVATAR_SIZE = 104;
+const AVATAR_SIZE = 128;
+const RING = 4;
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#101014",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 12,
-    padding: 24,
+    paddingHorizontal: space.xl,
   },
-  settingsButton: {
-    position: "absolute",
-    right: 20,
-    padding: 4,
-    zIndex: 1,
-  },
-  settingsContainer: {
+  scroll: {
     flex: 1,
-    backgroundColor: "#101014",
-    paddingHorizontal: 24,
-    paddingBottom: 24,
-    gap: 20,
   },
-  header: {
+  settingsContent: {
+    paddingHorizontal: space.xl,
+    gap: space.xl,
+    width: "100%",
+    maxWidth: 460,
+    alignSelf: "center",
+  },
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "space-between",
+    minHeight: 40,
   },
-  backButton: {
-    marginLeft: -6,
+  eyebrow: {
+    ...type.label,
+    color: color.accentSoft,
   },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#fff",
+  sectionLabel: {
+    ...type.label,
+    marginBottom: space.md,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+  },
+  iconButtonInner: {
+    width: 40,
+    height: 40,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // The hero sits slightly above true centre — dead-centring a single column
+  // under a floating tab bar reads as low.
+  hero: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: space.xl,
+  },
+  identity: {
+    alignItems: "center",
+    gap: space.md,
+    width: "100%",
   },
   avatarBlock: {
     alignItems: "center",
-    gap: 8,
+    gap: space.md,
   },
   avatarWrap: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
+    width: AVATAR_SIZE + RING * 2,
+    height: AVATAR_SIZE + RING * 2,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  removeText: {
-    color: "#8b8bf5",
-    fontSize: 14,
+  avatarGlow: {
+    position: "absolute",
+    width: AVATAR_SIZE + 56,
+    height: AVATAR_SIZE + 56,
+    borderRadius: (AVATAR_SIZE + 56) / 2,
+    backgroundColor: color.accent,
+    opacity: 0.22,
+    ...shadow.accent,
+  },
+  avatarRing: {
+    width: AVATAR_SIZE + RING * 2,
+    height: AVATAR_SIZE + RING * 2,
+    borderRadius: (AVATAR_SIZE + RING * 2) / 2,
+    borderWidth: RING,
+    borderColor: glass.strokeBright,
+    overflow: "hidden",
   },
   avatar: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
     borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: "#1c1c22",
+    backgroundColor: "rgba(255,255,255,0.06)",
   },
   avatarEmpty: {
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderColor: "#2a2a32",
+  },
+  avatarSheen: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: AVATAR_SIZE / 2,
   },
   avatarBadge: {
     position: "absolute",
-    right: 0,
-    bottom: 0,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    right: 2,
+    bottom: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    overflow: "hidden",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#5b5bf0",
-    borderWidth: 3,
-    borderColor: "#101014",
+    borderWidth: 2.5,
+    borderColor: color.void,
+  },
+  removeText: {
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 13,
   },
   nameRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    justifyContent: "center",
+    gap: space.md,
   },
   name: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#fff",
+    ...type.hero,
+    fontSize: 34,
+    lineHeight: 38,
+    textAlign: "center",
+    flexShrink: 1,
+  },
+  pencil: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(167,158,255,0.14)",
+  },
+  statusPill: {
+    alignSelf: "center",
+  },
+  statusInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  statusText: {
+    fontFamily: font.sansSemi,
+    fontSize: 12,
+    letterSpacing: 0.2,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   nameEditor: {
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 400,
+    alignSelf: "center",
     alignItems: "center",
-    gap: 10,
+    gap: space.md,
+  },
+  nameInputWrap: {
+    width: "100%",
+  },
+  fullWidth: {
+    width: "100%",
   },
   input: {
-    width: "100%",
-    backgroundColor: "#1c1c22",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    fontFamily: font.sansMedium,
+    color: color.text,
+    paddingHorizontal: space.lg,
+    paddingVertical: 15,
     fontSize: 17,
     textAlign: "center",
   },
-  saveButton: {
-    width: "100%",
-    backgroundColor: "#5b5bf0",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  saveText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "600",
-  },
   cancelButton: {
-    paddingVertical: 4,
+    paddingVertical: space.xs,
   },
   cancelText: {
-    color: "#8b8bf5",
-    fontSize: 15,
-  },
-  rows: {
-    width: "100%",
-    maxWidth: 420,
-    backgroundColor: "#1c1c22",
-    borderRadius: 12,
-    padding: 16,
-    gap: 10,
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 14,
   },
   row: {
     flexDirection: "row",
     justifyContent: "space-between",
-    gap: 16,
+    alignItems: "center",
+    gap: space.lg,
+    paddingVertical: 11,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: glass.strokeSoft,
   },
   rowLabel: {
-    color: "#9a9aa5",
-    fontSize: 15,
+    fontFamily: font.sans,
+    color: color.textDim,
+    fontSize: 14,
   },
   rowValue: {
-    color: "#fff",
-    fontSize: 15,
+    fontFamily: font.sansMedium,
+    color: color.text,
+    fontSize: 14,
     flexShrink: 1,
+    textAlign: "right",
+  },
+  rowValueMono: {
+    fontFamily: font.mono,
   },
   rowValueSmall: {
-    fontSize: 12,
-    color: "#c5c5cf",
+    fontSize: 11,
+    color: color.textDim,
   },
   error: {
-    color: "#ff6b6b",
-    fontSize: 14,
+    fontFamily: font.sansMedium,
+    color: color.danger,
+    fontSize: 13,
     textAlign: "center",
   },
   signOut: {
-    marginTop: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    backgroundColor: "#2a2a32",
-  },
-  signOutText: {
-    color: "#ff6b6b",
-    fontSize: 15,
-    fontWeight: "600",
+    marginTop: space.sm,
   },
 });

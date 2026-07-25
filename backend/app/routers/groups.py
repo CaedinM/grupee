@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .. import models, schemas
+from .. import models, redis_client, schemas
 from ..auth import get_clerk_id, get_current_user, require_self
 from ..database import get_db
 
@@ -140,29 +140,37 @@ def join_group(
     return membership
 
 
-# 🔥 hot path: the map read, polled every ~2s per client
-# get_clerk_id (not get_current_user) keeps this at its original query count.
+# 🔥 hot path: the map read, polled every ~2s per client. One Postgres query
+# for the roster (memberships + user cards) joined against one Redis MGET for
+# the live positions — positions never come from the main database.
+# get_clerk_id (not get_current_user) keeps the auth cost at a token check only.
 @router.get("/{group_id}/locations", response_model=schemas.GroupLocationsOut)
 def get_group_locations(
     group_id: str, _: str = Depends(get_clerk_id), db: Session = Depends(get_db)
 ):
     get_group_or_404(db, group_id)
     rows = db.execute(
-        select(models.Membership, models.User.display_name, models.User.avatar_url, models.Location)
+        select(models.Membership, models.User.display_name, models.User.avatar_url)
         .join(models.User, models.User.id == models.Membership.user_id)
-        .outerjoin(models.Location, models.Location.user_id == models.Membership.user_id)
         .where(models.Membership.group_id == group_id)
         .order_by(models.Membership.joined_at)
     ).all()
+    # One round-trip for every member's position; missing/expired ones are absent
+    # from the map and render as location=null, same as a member who never reported.
+    positions = redis_client.read_locations([m.user_id for m, _name, _avatar in rows])
     members = [
         schemas.MemberLocationOut(
             user_id=membership.user_id,
             display_name=display_name,
             avatar_url=avatar_url,
             role=membership.role,
-            location=schemas.LocationSnapshot.model_validate(location) if location else None,
+            location=(
+                schemas.LocationSnapshot(**positions[membership.user_id])
+                if membership.user_id in positions
+                else None
+            ),
         )
-        for membership, display_name, avatar_url, location in rows
+        for membership, display_name, avatar_url in rows
     ]
     return schemas.GroupLocationsOut(members=members)
 

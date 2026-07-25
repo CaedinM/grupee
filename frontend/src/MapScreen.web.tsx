@@ -1,9 +1,14 @@
 // react-native-maps has no web support, so web gets the raw telemetry view
 // instead of a map. Real map testing happens in Expo Go.
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import type { Group, User } from "./api";
 import { landmarksContaining } from "./geo";
+import { useTabBarClearance } from "./TabBar";
+import { GlassSurface, Reveal } from "./ui/Glass";
+import { color, font, glass, radius, space, type as typeScale } from "./ui/theme";
 import { useEventLandmarks } from "./useEventLandmarks";
 import { currentSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
@@ -49,40 +54,52 @@ export default function MapScreen({
   // stage name in the landmark pill, here it's appended to the "You're at:" line.
   const sets = useEventSets(live ? (group?.event_id ?? null) : null);
   const now = Date.now();
+  const insets = useSafeAreaInsets();
+  const clearance = useTabBarClearance();
 
   return (
-    <View style={styles.card}>
-      <Text style={styles.title}>Hey, {user.display_name}</Text>
-      <Text style={styles.subtitle}>
-        The map view is native-only — open the app in Expo Go to see it. Location telemetry still
-        runs here:
-      </Text>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={[
+        styles.card,
+        { paddingTop: insets.top + space.xl, paddingBottom: clearance + space.lg },
+      ]}
+      showsVerticalScrollIndicator={false}
+    >
+      <Reveal>
+        <Text style={styles.eyebrow}>Web preview</Text>
+        <Text style={typeScale.hero}>Hey, {user.display_name}</Text>
+        <Text style={[styles.subtitle, { marginTop: space.sm }]}>
+          The map view is native-only — open the app in Expo Go to see it. Location telemetry still
+          runs here:
+        </Text>
+      </Reveal>
 
       {(liveness.status === "none" || liveness.status === "ended") && (
-        <Text style={styles.subtitle}>
+        <Note icon={liveness.status === "ended" ? "flag" : "people"}>
           {liveness.status === "ended" && liveness.event ? `${liveness.event.name} has ended. ` : ""}
           Use this page to track your group at your next event — go to My Groups to join your
           friends.
-        </Text>
+        </Note>
       )}
 
       {liveness.status === "upcoming" && liveness.event && (
-        <Text style={styles.subtitle}>
+        <Note icon="hourglass">
           {liveness.event.name} has not started yet.{" "}
           {liveness.event.starts_at
             ? `Check back at ${formatStartsAt(liveness.event.starts_at)} to see where your friends are at.`
             : "Check back once it starts to see where your friends are at."}
-        </Text>
+        </Note>
       )}
 
-      {permission === "asking" && <Text style={styles.subtitle}>Requesting location access…</Text>}
+      {permission === "asking" && <Note icon="locate">Requesting location access…</Note>}
       {permission === "denied" && (
         <Text style={styles.error}>
           Location permission denied. Enable it in your browser to share your position.
         </Text>
       )}
       {permission === "granted" && (
-        <View style={styles.stats}>
+        <StatBlock label="Telemetry">
           <Stat label="Updates sent" value={String(sentCount)} />
           {lastAck && (
             <>
@@ -94,17 +111,18 @@ export default function MapScreen({
               />
             </>
           )}
-        </View>
+        </StatBlock>
       )}
 
-      <Pressable onPress={onOpenGroups}>
+      <Pressable onPress={onOpenGroups} style={styles.groupLinkRow}>
+        <Ionicons name="people" size={15} color={color.accentSoft} />
         <Text style={styles.groupLink}>
           {group ? `Viewing group: ${group.name} (${group.code})` : "No group — tap to join one"}
         </Text>
       </Pressable>
 
       {group && (
-        <View style={styles.stats}>
+        <StatBlock label="Members">
           {members.map((m) => (
             <Stat
               key={m.user_id}
@@ -116,31 +134,63 @@ export default function MapScreen({
               }
             />
           ))}
-        </View>
+        </StatBlock>
       )}
 
       {insideLandmarks.length > 0 && (
-        <Text style={styles.subtitle}>
-          You're at:{" "}
-          {insideLandmarks
-            .map((l) => {
-              const playing =
-                live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
-              return playing ? `${l.name} (${playing.artist})` : l.name;
-            })
-            .join(", ")}
-        </Text>
-      )}
-
-      {group && landmarks.length > 0 && (
-        <View style={styles.stats}>
-          {landmarks.map((l) => (
-            <Stat key={l.id} label={l.name} value={`${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}`} />
-          ))}
+        <View style={styles.hereRow}>
+          <Ionicons name="location" size={14} color={color.teal} />
+          <Text style={styles.hereText}>
+            You're at:{" "}
+            {insideLandmarks
+              .map((l) => {
+                const playing =
+                  live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
+                return playing ? `${l.name} (${playing.artist})` : l.name;
+              })
+              .join(", ")}
+          </Text>
         </View>
       )}
 
+      {group && landmarks.length > 0 && (
+        <StatBlock label="Landmarks">
+          {landmarks.map((l) => (
+            <Stat key={l.id} label={l.name} value={`${l.lat.toFixed(5)}, ${l.lng.toFixed(5)}`} />
+          ))}
+        </StatBlock>
+      )}
+
       {(error ?? groupError) && <Text style={styles.error}>{error ?? groupError}</Text>}
+    </ScrollView>
+  );
+}
+
+/** Mirrors the native map's centred overlay card, as an inline block. */
+function Note({
+  icon,
+  children,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  children: React.ReactNode;
+}) {
+  return (
+    <GlassSurface r={radius.lg}>
+      <View style={styles.noteBody}>
+        <Ionicons name={icon} size={18} color={color.accentSoft} />
+        <Text style={styles.noteText}>{children}</Text>
+      </View>
+    </GlassSurface>
+  );
+}
+
+function StatBlock({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <View>
+      <Text style={styles.blockLabel}>{label}</Text>
+      <GlassSurface r={radius.lg}>
+        <View style={styles.stats}>{children}</View>
+      </GlassSurface>
     </View>
   );
 }
@@ -148,57 +198,105 @@ export default function MapScreen({
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <View style={styles.statRow}>
-      <Text style={styles.statLabel}>{label}</Text>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel} numberOfLines={1}>
+        {label}
+      </Text>
+      <Text style={styles.statValue} numberOfLines={1}>
+        {value}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  scroll: {
     flex: 1,
+  },
+  card: {
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 460,
     alignSelf: "center",
-    justifyContent: "center",
-    gap: 12,
-    padding: 24,
+    gap: space.lg,
+    paddingHorizontal: space.xl,
   },
-  title: {
-    fontSize: 34,
-    fontWeight: "800",
-    color: "#fff",
+  eyebrow: {
+    ...typeScale.label,
+    color: color.accentSoft,
+    marginBottom: space.sm,
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#9a9aa5",
+  subtitle: typeScale.subtitle,
+  noteBody: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.md,
+    padding: space.lg,
+  },
+  noteText: {
+    flex: 1,
+    fontFamily: font.sans,
+    fontSize: 14.5,
+    lineHeight: 21,
+    color: color.textDim,
+  },
+  blockLabel: {
+    ...typeScale.label,
+    marginBottom: space.md,
   },
   stats: {
-    backgroundColor: "#1c1c22",
-    borderRadius: 12,
-    padding: 16,
-    gap: 8,
+    padding: space.lg,
+    gap: space.sm,
   },
   statRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
+    gap: space.md,
   },
   statLabel: {
-    color: "#9a9aa5",
-    fontSize: 15,
+    fontFamily: font.sans,
+    color: color.textDim,
+    fontSize: 14,
+    flexShrink: 1,
   },
+  // Mono rather than tabular-nums: the coordinates are the point of this view.
   statValue: {
-    color: "#fff",
-    fontSize: 15,
-    fontVariant: ["tabular-nums"],
+    fontFamily: font.mono,
+    color: color.text,
+    fontSize: 13,
+    letterSpacing: -0.2,
+    flexShrink: 0,
+  },
+  groupLinkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    alignSelf: "flex-start",
+    paddingVertical: space.sm,
+    paddingHorizontal: 14,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(167,158,255,0.12)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: glass.stroke,
   },
   groupLink: {
-    color: "#8b8bf5",
+    fontFamily: font.sansSemi,
+    color: color.accentSoft,
+    fontSize: 13.5,
+  },
+  hereRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+  },
+  hereText: {
+    flex: 1,
+    fontFamily: font.sansMedium,
+    color: color.teal,
     fontSize: 14,
-    fontWeight: "600",
   },
   error: {
-    color: "#ff6b6b",
+    fontFamily: font.sansMedium,
+    color: color.danger,
     fontSize: 14,
   },
 });

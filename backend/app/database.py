@@ -1,18 +1,51 @@
 """Engine, session factory, declarative base, and the per-request session dependency."""
 import os
+import re
 
 from dotenv import load_dotenv
 from sqlalchemy import create_engine, event
+from sqlalchemy.engine.url import make_url
+from sqlalchemy.exc import ArgumentError
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 load_dotenv()
 
 
+def _redact(url: str) -> str:
+    """The value with any password starred out — safe to put in a log line.
+    Deliberately loose about the surrounding shape: this runs on values that
+    failed to parse, so it cannot assume a well-formed `scheme://user:pass@`."""
+    return re.sub(r":[^:@]*@", ":***@", url)
+
+
 def normalize_database_url(url: str) -> str:
-    """Railway (and Heroku-style providers) hand out `postgres://`, a scheme
-    SQLAlchemy 2.0 dropped. Rewrite it to the driver we actually install."""
+    """Turn whatever the platform hands us into a URL SQLAlchemy accepts, or
+    fail with a message that says which of the usual mistakes was made — the
+    raw SQLAlchemy parse error names neither the variable nor its value."""
+    url = url.strip().strip("'\"")  # stray quotes around a pasted value
+
+    if "${{" in url or url.startswith("$"):
+        raise RuntimeError(
+            f"DATABASE_URL is an unresolved variable reference ({url!r}). On Railway the "
+            "reference must name the database service exactly as it appears in the project "
+            "— if the service is called 'Postgres' that is ${{Postgres.DATABASE_URL}}, but a "
+            "service named e.g. 'wyat-db' needs ${{wyat-db.DATABASE_URL}}. A dangling "
+            "reference is passed through as literal text."
+        )
+
+    # Railway and Heroku-style providers emit `postgres://`, a scheme SQLAlchemy
+    # 2.0 dropped. Rewrite it to the driver we actually install.
     if url.startswith("postgres://"):
-        return "postgresql+psycopg2://" + url[len("postgres://") :]
+        url = "postgresql+psycopg2://" + url[len("postgres://") :]
+
+    try:
+        make_url(url)
+    except ArgumentError as exc:
+        raise RuntimeError(
+            f"DATABASE_URL is not a valid SQLAlchemy URL: {_redact(url)!r} ({exc}). "
+            "Expected something like postgresql://user:password@host:5432/railway"
+        ) from exc
+
     return url
 
 

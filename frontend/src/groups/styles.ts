@@ -3,228 +3,218 @@
  * single flow and share their card/title/button look, so splitting these
  * per-file would mean duplicating the same primitives six times — a palette
  * tweak should stay a one-file edit.
+ *
+ * Surfaces are drawn by the Nightglass primitives in `../ui/Glass`, not here:
+ * these rules position and set type, and never carry an opaque background,
+ * because the app-wide Aurora has to show through.
  */
 import { StyleSheet } from "react-native";
 
+import { color, font, glass, radius, space, type } from "../ui/theme";
+
 /** Avatars per row in a past-group card; wider crews wrap onto more rows. */
-const PAST_MEMBERS_PER_ROW = 6;
+const PAST_MEMBERS_PER_ROW = 5;
 
 export const styles = StyleSheet.create({
   center: {
     flex: 1,
-    backgroundColor: "#101014",
     alignItems: "center",
     justifyContent: "center",
   },
   card: {
     flex: 1,
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 460,
     alignSelf: "center",
     justifyContent: "center",
-    gap: 12,
-    padding: 24,
-    backgroundColor: "#101014",
+    gap: space.lg,
+    padding: space.xl,
   },
   scroll: {
     flex: 1,
-    backgroundColor: "#101014",
   },
   // Grows to fill the screen so the buttons can centre when there is no
   // history, but scrolls once past groups push it past the viewport.
   chooserContent: {
     flexGrow: 1,
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 460,
     alignSelf: "center",
-    gap: 12,
-    padding: 24,
-    paddingTop: 72,
-    paddingBottom: 40,
+    gap: space.md,
+    padding: space.xl,
+    paddingTop: 84,
+    paddingBottom: space.xxl,
   },
   chooserContentCentered: {
     justifyContent: "center",
-    paddingTop: 24,
+    paddingTop: space.xl,
+  },
+  // The create form can outgrow the viewport once a festival list arrives, so
+  // it scrolls from the top rather than centring like the other steps.
+  formContent: {
+    flexGrow: 1,
+    width: "100%",
+    maxWidth: 460,
+    alignSelf: "center",
+    gap: space.md,
+    padding: space.xl,
+    paddingTop: 76,
+    paddingBottom: space.xxl,
+  },
+  // Holds the back link at the top of a centred card without it stretching.
+  backSlot: {
+    position: "absolute",
+    top: 68,
+    left: space.xl,
   },
   groupContainer: {
     flex: 1,
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 460,
     alignSelf: "center",
-    gap: 12,
-    padding: 24,
-    paddingTop: 72,
-    backgroundColor: "#101014",
+    gap: space.md,
+    padding: space.xl,
+    paddingTop: 76,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#fff",
+
+  /* ------------------------------------------------------------- type */
+
+  eyebrow: {
+    ...type.label,
+    color: color.accentSoft,
+    marginBottom: space.sm,
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#9a9aa5",
-  },
+  title: type.title,
+  subtitle: type.subtitle,
   sectionHeader: {
-    marginTop: 12,
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#71717c",
-    textTransform: "uppercase",
-    letterSpacing: 1,
+    ...type.label,
+    marginTop: space.lg,
+    marginBottom: space.sm,
   },
+  error: {
+    fontFamily: font.sansMedium,
+    color: color.danger,
+    fontSize: 14,
+  },
+
+  /* ------------------------------------------------------------ inputs */
+
   input: {
-    backgroundColor: "#1c1c22",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    fontFamily: font.sansMedium,
+    color: color.text,
+    paddingHorizontal: space.lg,
+    paddingVertical: 15,
     fontSize: 17,
   },
+  // The join code is the one place the app uses mono at size — four glyphs on
+  // a fixed grid, so the caret lands predictably as you type.
   codeInput: {
+    fontFamily: font.monoBold,
     textAlign: "center",
-    fontSize: 28,
-    fontWeight: "800",
-    letterSpacing: 12,
+    fontSize: 34,
+    paddingVertical: 20,
+    letterSpacing: 14,
+    // The tracking is applied to the right of each glyph, so the string reads
+    // off-centre without pulling it back.
+    paddingLeft: 14,
   },
-  button: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "#5b5bf0",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  buttonSecondary: {
-    backgroundColor: "#2a2a32",
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "600",
-  },
+
+  /* ------------------------------------------------------------- code */
+
   codeBadge: {
     alignSelf: "flex-start",
-    alignItems: "center",
-    backgroundColor: "#1c1c22",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#2a2a32",
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    gap: 2,
   },
   codeBadgeBig: {
-    alignSelf: "center",
-    paddingHorizontal: 32,
-    paddingVertical: 18,
+    alignSelf: "stretch",
+  },
+  codeBody: {
+    alignItems: "center",
+    paddingHorizontal: space.xl,
+    paddingVertical: 14,
+    gap: space.xs,
+  },
+  codeBodyBig: {
+    paddingVertical: space.xxl,
+    gap: space.md,
   },
   codeText: {
-    color: "#fff",
-    fontSize: 26,
-    fontWeight: "800",
-    letterSpacing: 8,
+    fontFamily: font.monoBold,
+    color: color.text,
+    fontSize: 28,
+    letterSpacing: 10,
+    paddingLeft: 10,
   },
   codeTextBig: {
-    fontSize: 44,
-    letterSpacing: 14,
+    fontSize: 54,
+    letterSpacing: 18,
+    paddingLeft: 18,
   },
   codeShareRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: space.xs,
   },
   codeShareHint: {
-    color: "#8b8bf5",
-    fontSize: 12,
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 11,
+    letterSpacing: 0.3,
+  },
+
+  /* ---------------------------------------------------------- members */
+
+  // The event chip and the join code share a row; the code keeps its intrinsic
+  // width so the two read as a pair of tokens rather than a stack of bars.
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: space.sm,
+  },
+  // Takes the slack in the column so the roster — not the header — is what
+  // scrolls when a crew outgrows the screen.
+  memberSection: {
+    flex: 1,
+    marginTop: space.sm,
   },
   memberList: {
-    backgroundColor: "#1c1c22",
-    borderRadius: 12,
-    padding: 8,
+    flex: 1,
+  },
+  memberListBody: {
+    padding: space.sm,
+  },
+  memberLoading: {
+    padding: space.xl,
+    alignItems: "center",
   },
   memberRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    gap: space.md,
+    paddingHorizontal: space.md,
+    paddingVertical: 11,
   },
   memberAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "#2a2a32",
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: glass.stroke,
   },
   memberAvatarEmpty: {
     alignItems: "center",
     justifyContent: "center",
   },
-  pastCard: {
-    backgroundColor: "#1c1c22",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#2a2a32",
-    padding: 16,
-    gap: 6,
-  },
-  pastGroupName: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "700",
-  },
-  pastEventRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  pastEventName: {
-    color: "#8b8bf5",
-    fontSize: 14,
-    fontWeight: "600",
-    flexShrink: 1,
-  },
-  pastDates: {
-    color: "#71717c",
-    fontSize: 13,
-  },
-  pastMembersLoading: {
-    alignSelf: "flex-start",
-    marginTop: 8,
-  },
-  pastMemberGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 8,
-  },
-  pastMember: {
-    // Six to a row; extra members wrap onto the next line.
-    width: `${100 / PAST_MEMBERS_PER_ROW}%`,
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 2,
-    marginBottom: 10,
-  },
-  pastMemberAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#2a2a32",
-  },
-  pastMemberName: {
-    color: "#9a9aa5",
-    fontSize: 10,
-    textAlign: "center",
-    width: "100%",
-  },
   memberName: {
-    color: "#fff",
-    fontSize: 16,
+    fontFamily: font.sansMedium,
+    color: color.text,
+    fontSize: 15,
     flexShrink: 1,
+  },
+  memberYou: {
+    fontFamily: font.sans,
+    color: color.textFaint,
   },
   // Pushed to the right edge of the row; teal ties it to the landmark pins/pill
   // on the map. flexShrink lets a long landmark name truncate rather than shove
@@ -233,77 +223,153 @@ export const styles = StyleSheet.create({
     marginLeft: "auto",
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
+    gap: space.xs,
     flexShrink: 1,
-    paddingLeft: 8,
+    paddingLeft: space.sm,
+    paddingVertical: 4,
+    paddingHorizontal: space.sm,
+    borderRadius: radius.pill,
+    backgroundColor: "rgba(94,234,212,0.10)",
   },
   memberLandmarkText: {
-    color: "#5eead4",
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.sansSemi,
+    color: color.teal,
+    fontSize: 12,
     flexShrink: 1,
+  },
+
+  /* ------------------------------------------------------------- past */
+
+  pastCard: {
+    marginBottom: space.md,
+  },
+  pastBody: {
+    padding: space.lg,
+    gap: space.xs,
+  },
+  pastGroupName: {
+    fontFamily: font.displayBold,
+    color: color.text,
+    fontSize: 19,
+    letterSpacing: -0.5,
+  },
+  pastEventRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+  },
+  pastEventName: {
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 13,
+    flexShrink: 1,
+  },
+  pastDates: {
+    fontFamily: font.mono,
+    color: color.textFaint,
+    fontSize: 11,
+    letterSpacing: -0.2,
+  },
+  pastMembersLoading: {
+    alignSelf: "flex-start",
+    marginTop: space.sm,
+  },
+  pastMemberGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: space.md,
+  },
+  pastMember: {
+    // Five to a row; extra members wrap onto the next line.
+    width: `${100 / PAST_MEMBERS_PER_ROW}%`,
+    alignItems: "center",
+    gap: space.xs,
+    paddingHorizontal: 2,
+    marginBottom: space.md,
+  },
+  pastMemberAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.07)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: glass.stroke,
+  },
+  pastMemberName: {
+    fontFamily: font.sans,
+    color: color.textDim,
+    fontSize: 10,
+    textAlign: "center",
+    width: "100%",
+  },
+
+  /* ------------------------------------------------------------ event */
+
+  eventOption: {
+    marginBottom: space.sm,
+  },
+  eventOptionSelected: {
+    borderWidth: 1,
+    borderColor: "rgba(167,158,255,0.55)",
+    borderRadius: radius.md,
+  },
+  eventOptionBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: 15,
+  },
+  eventOptionText: {
+    flex: 1,
+    fontFamily: font.sansMedium,
+    color: color.textDim,
+    fontSize: 15,
+  },
+  eventOptionTextSelected: {
+    fontFamily: font.sansSemi,
+    color: color.text,
+  },
+  eventChip: {
+    alignSelf: "flex-start",
+  },
+  eventChipBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+    paddingHorizontal: space.md,
+    paddingVertical: 7,
+  },
+  eventChipText: {
+    fontFamily: font.sansSemi,
+    color: color.accentSoft,
+    fontSize: 12.5,
+  },
+
+  /* ------------------------------------------------------------- misc */
+
+  backLink: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.xs,
+    paddingRight: space.md,
+    paddingVertical: space.xs,
+  },
+  backText: {
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 14,
   },
   leaveButton: {
     marginTop: "auto",
     alignSelf: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 24,
+    paddingVertical: space.md,
+    paddingHorizontal: space.xl,
   },
   leaveText: {
-    color: "#ff6b6b",
-    fontSize: 15,
-    fontWeight: "600",
-  },
-  eventOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    backgroundColor: "#1c1c22",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#2a2a32",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  eventOptionSelected: {
-    borderColor: "#5b5bf0",
-    backgroundColor: "rgba(91, 91, 240, 0.12)",
-  },
-  eventOptionText: {
-    flex: 1,
-    color: "#c5c5cf",
-    fontSize: 16,
-  },
-  eventOptionTextSelected: {
-    color: "#fff",
-    fontWeight: "600",
-  },
-  eventChip: {
-    alignSelf: "flex-start",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(91, 91, 240, 0.15)",
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  eventChipText: {
-    color: "#8b8bf5",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  backLink: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
-  },
-  backText: {
-    color: "#8b8bf5",
-    fontSize: 15,
-  },
-  error: {
-    color: "#ff6b6b",
+    fontFamily: font.sansSemi,
+    color: color.danger,
     fontSize: 14,
   },
 });

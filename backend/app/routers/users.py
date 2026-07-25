@@ -1,11 +1,10 @@
 import uuid
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import models, schemas
+from .. import models, redis_client, schemas
 from ..auth import get_clerk_id, get_current_user, require_self
 from ..database import get_db
 from ..storage import storage
@@ -124,30 +123,24 @@ def delete_avatar(
     db.commit()
 
 
-# 🔥 hot path: called every ~1.5s per client
+# 🔥 hot path: called every ~1.5s per client. The position never touches the
+# main database — it's written to Redis with a staleness TTL (see redis_client).
 @router.put("/users/{user_id}/location", response_model=schemas.LocationOut)
 def upsert_location(
     user_id: str,
     body: schemas.LocationIn,
     user: models.User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
-    # get_current_user's indexed clerk_id lookup replaces the old
-    # get_user_or_404, so this stays at two queries per report.
     require_self(user, user_id)
-    location = db.get(models.Location, user_id)
-    if location is None:
-        location = models.Location(user_id=user_id)
-        db.add(location)
-    location.lat = body.lat
-    location.lng = body.lng
-    location.heading = body.heading
-    location.battery = body.battery
-    location.accuracy = body.accuracy
-    location.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(location)
-    return location
+    payload = redis_client.write_location(
+        user_id,
+        lat=body.lat,
+        lng=body.lng,
+        heading=body.heading,
+        battery=body.battery,
+        accuracy=body.accuracy,
+    )
+    return schemas.LocationOut(user_id=user_id, **payload)
 
 
 @router.get("/users/{user_id}/groups", response_model=list[schemas.UserGroupOut])

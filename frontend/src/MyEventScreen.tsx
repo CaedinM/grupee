@@ -1,8 +1,13 @@
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { type EventSet } from "./api";
+import { useTabBarClearance } from "./TabBar";
+import { GlassSurface, PulseDot, Reveal, usePressScale } from "./ui/Glass";
+import { color, font, radius, ramp, space, type } from "./ui/theme";
 import { useEventLandmarks } from "./useEventLandmarks";
 import { useEventSets } from "./useEventSets";
 import { type EventLiveness } from "./useEventLiveness";
@@ -67,6 +72,9 @@ function formatTime(iso: string): string {
  */
 export default function MyEventScreen({ liveness }: { liveness: EventLiveness }) {
   const insets = useSafeAreaInsets();
+  // The tab bar floats over the content, so the last set has to be padded
+  // clear of it by hand.
+  const clearance = useTabBarClearance();
   const event = liveness.event;
   // The lineup is worth showing whether the event is upcoming, live, or over,
   // so fetch it whenever there's an event (not gated on liveness).
@@ -111,35 +119,91 @@ export default function MyEventScreen({ liveness }: { liveness: EventLiveness })
   const filtered = selected === ALL ? lineup : lineup.filter((s) => bucketOf(s) === selected);
   // Label each row with its stage only in the combined "All" view.
   const showStageOnRow = selected === ALL && showTabs;
+  const liveCount = filtered.filter((s) => isLiveNow(s, now)).length;
 
   return (
     <ScrollView
-      style={[styles.container, { paddingTop: insets.top }]}
-      contentContainerStyle={styles.content}
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        { paddingTop: insets.top + space.md, paddingBottom: clearance + space.lg },
+      ]}
+      showsVerticalScrollIndicator={false}
     >
       {!event ? (
-        <>
-          <Text style={styles.title}>My Event</Text>
-          <Text style={styles.empty}>
-            {liveness.status === "loading"
-              ? "Loading your event…"
-              : "You're not in an event yet. Join or create a group to see your event."}
-          </Text>
-        </>
+        <Reveal>
+          <Text style={styles.eyebrow}>Your event</Text>
+          <Text style={type.hero}>Nothing booked</Text>
+          <GlassSurface r={radius.lg} style={styles.emptyCard}>
+            <View style={styles.emptyBody}>
+              <Ionicons name="musical-notes-outline" size={26} color={color.accentSoft} />
+              <Text style={styles.empty}>
+                {liveness.status === "loading"
+                  ? "Loading your event…"
+                  : "Join or create a crew and the festival's full lineup shows up here."}
+              </Text>
+            </View>
+          </GlassSurface>
+        </Reveal>
       ) : (
         <>
-          <Text style={styles.title}>{event.name}</Text>
+          <Reveal>
+            <Text style={styles.eyebrow}>
+              {liveness.status === "live"
+                ? "Happening now"
+                : liveness.status === "ended"
+                  ? "That's a wrap"
+                  : "Your event"}
+            </Text>
+            <Text style={type.hero}>{event.name}</Text>
+          </Reveal>
 
           {liveness.status === "upcoming" && event.starts_at && (
-            <View style={styles.upcoming}>
-              <Text style={styles.upcomingDate}>{formatDate(event.starts_at)}</Text>
-              <Text style={styles.upcomingTime}>Starts {formatTime(event.starts_at)}</Text>
-            </View>
+            <Reveal delay={70}>
+              <GlassSurface r={radius.lg} raised style={styles.upcomingCard}>
+                <View style={styles.upcomingBody}>
+                  <View style={styles.upcomingIcon}>
+                    <LinearGradient
+                      colors={ramp.accent}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={StyleSheet.absoluteFill}
+                    />
+                    <Ionicons name="calendar" size={19} color="#fff" />
+                  </View>
+                  <View style={styles.upcomingText}>
+                    <Text style={styles.upcomingDate}>{formatDate(event.starts_at)}</Text>
+                    <Text style={styles.upcomingTime}>
+                      Doors {formatTime(event.starts_at)}
+                    </Text>
+                  </View>
+                </View>
+              </GlassSurface>
+            </Reveal>
           )}
 
-          <Text style={styles.sectionTitle}>Lineup</Text>
+          <Reveal delay={110}>
+            <View style={styles.sectionRow}>
+              <Text style={styles.sectionLabel}>Lineup</Text>
+              {liveCount > 0 && (
+                <View style={styles.liveCount}>
+                  <PulseDot />
+                  <Text style={styles.liveCountText}>
+                    {liveCount} on now
+                  </Text>
+                </View>
+              )}
+            </View>
+          </Reveal>
+
           {lineup.length === 0 ? (
-            <Text style={styles.empty}>No sets scheduled yet.</Text>
+            <Reveal delay={140}>
+              <GlassSurface r={radius.lg} style={styles.emptyCard}>
+                <View style={styles.emptyBody}>
+                  <Text style={styles.empty}>No sets scheduled yet.</Text>
+                </View>
+              </GlassSurface>
+            </Reveal>
           ) : (
             <>
               {showTabs && (
@@ -149,35 +213,32 @@ export default function MyEventScreen({ liveness }: { liveness: EventLiveness })
                   style={styles.tabs}
                   contentContainerStyle={styles.tabsContent}
                 >
-                  {tabs.map((t) => {
-                    const active = t.key === selected;
-                    return (
-                      <Pressable
-                        key={t.key}
-                        style={[styles.chip, active && styles.chipActive]}
-                        onPress={() => setStageFilter(t.key)}
-                      >
-                        <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                          {t.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
+                  {tabs.map((t) => (
+                    <StageChip
+                      key={t.key}
+                      label={t.label}
+                      active={t.key === selected}
+                      onPress={() => setStageFilter(t.key)}
+                    />
+                  ))}
                 </ScrollView>
               )}
-              <View style={styles.list}>
-                {filtered.map((set) => (
-                  <SetRow
-                    key={set.id}
-                    set={set}
-                    live={isLiveNow(set, now)}
-                    past={isFinished(set, now)}
-                    stage={
-                      showStageOnRow && set.landmark_id
-                        ? stageName.get(set.landmark_id) ?? null
-                        : null
-                    }
-                  />
+              {/* Keyed on the filter so switching stages remounts the rows and
+                  re-runs the stagger — the filter change gets its own beat. */}
+              <View style={styles.list} key={selected}>
+                {filtered.map((set, i) => (
+                  <Reveal key={set.id} delay={Math.min(i, 8) * 45}>
+                    <SetRow
+                      set={set}
+                      live={isLiveNow(set, now)}
+                      past={isFinished(set, now)}
+                      stage={
+                        showStageOnRow && set.landmark_id
+                          ? stageName.get(set.landmark_id) ?? null
+                          : null
+                      }
+                    />
+                  </Reveal>
                 ))}
               </View>
             </>
@@ -188,6 +249,46 @@ export default function MyEventScreen({ liveness }: { liveness: EventLiveness })
   );
 }
 
+/** Glass segmented-control chip. The active one fills with the accent ramp. */
+function StageChip({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.93);
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+        {active ? (
+          <View style={styles.chipActive}>
+            <LinearGradient
+              colors={ramp.accent}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <LinearGradient colors={ramp.sheen} style={styles.chipSheen} pointerEvents="none" />
+            <Text style={[styles.chipText, styles.chipTextActive]}>{label}</Text>
+          </View>
+        ) : (
+          <GlassSurface r={radius.pill} intensity={34} sheen={false}>
+            <Text style={[styles.chipText, styles.chipPad]}>{label}</Text>
+          </GlassSurface>
+        )}
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/**
+ * One set. The live row is the loudest thing on the screen: it gets a magenta
+ * gradient rail down its leading edge and a brighter pane; finished sets fade
+ * back so the eye lands on what's next.
+ */
 function SetRow({
   set,
   stage,
@@ -200,113 +301,182 @@ function SetRow({
   past: boolean;
 }) {
   return (
-    <View style={[styles.row, live && styles.rowLive, past && styles.rowPast]}>
-      <View style={styles.rowMain}>
-        {live && (
-          <View style={styles.nowBadge}>
-            <View style={styles.nowDot} />
-            <Text style={styles.nowText}>Now playing</Text>
-          </View>
-        )}
-        <Text style={[styles.artist, past && styles.textPast]}>{set.artist}</Text>
-        {stage && <Text style={[styles.rowStage, past && styles.textPast]}>{stage}</Text>}
+    <GlassSurface
+      r={radius.md}
+      intensity={live ? 52 : 38}
+      raised={live}
+      style={[styles.row, past && styles.rowPast]}
+    >
+      {live && (
+        <LinearGradient
+          colors={ramp.live}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={styles.rail}
+          pointerEvents="none"
+        />
+      )}
+      <View style={[styles.rowBody, live && styles.rowBodyLive]}>
+        <View style={styles.rowMain}>
+          {live && (
+            <View style={styles.nowBadge}>
+              <PulseDot />
+              <Text style={styles.nowText}>Now playing</Text>
+            </View>
+          )}
+          <Text style={[styles.artist, past && styles.textPast]} numberOfLines={1}>
+            {set.artist}
+          </Text>
+          {stage && (
+            <Text style={[styles.rowStage, past && styles.textPast]} numberOfLines={1}>
+              {stage}
+            </Text>
+          )}
+        </View>
+        <View style={styles.timeBlock}>
+          <Text style={[styles.timeStart, past && styles.textPast]}>
+            {formatTime(set.start_time)}
+          </Text>
+          <Text style={[styles.timeEnd, past && styles.textPast]}>
+            {formatTime(set.end_time)}
+          </Text>
+        </View>
       </View>
-      <Text style={[styles.setTime, past && styles.textPast]}>
-        {formatTime(set.start_time)} – {formatTime(set.end_time)}
-      </Text>
-    </View>
+    </GlassSurface>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#101014",
   },
   content: {
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: 32,
+    paddingHorizontal: space.xl,
+    width: "100%",
+    maxWidth: 520,
+    alignSelf: "center",
   },
-  title: {
-    fontSize: 34,
-    fontWeight: "800",
-    color: "#fff",
+  eyebrow: {
+    ...type.label,
+    marginBottom: space.sm,
+    color: color.accentSoft,
   },
-  upcoming: {
-    marginTop: 12,
-    gap: 2,
+  upcomingCard: {
+    marginTop: space.lg,
+  },
+  upcomingBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    padding: space.lg,
+  },
+  upcomingIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  upcomingText: {
+    gap: 1,
   },
   upcomingDate: {
+    fontFamily: font.displaySemi,
     fontSize: 17,
-    color: "#e6e6ee",
-    fontWeight: "600",
+    letterSpacing: -0.3,
+    color: color.text,
   },
   upcomingTime: {
-    fontSize: 15,
-    color: "#9a9aa5",
-  },
-  sectionTitle: {
-    marginTop: 28,
-    marginBottom: 12,
+    fontFamily: font.sans,
     fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.5,
+    color: color.textDim,
+  },
+  sectionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: space.xxl,
+    marginBottom: space.lg,
+  },
+  sectionLabel: {
+    ...type.label,
+  },
+  liveCount: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+  },
+  liveCountText: {
+    fontFamily: font.sansSemi,
+    fontSize: 11,
+    letterSpacing: 0.6,
     textTransform: "uppercase",
-    color: "#71717c",
+    color: color.magenta,
   },
   tabs: {
-    marginBottom: 12,
-    marginHorizontal: -24,
+    marginBottom: space.lg,
+    marginHorizontal: -space.xl,
+    flexGrow: 0,
   },
   tabsContent: {
-    paddingHorizontal: 24,
-    gap: 8,
+    paddingHorizontal: space.xl,
+    gap: space.sm,
   },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: "#16161b",
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: "#2a2a32",
+  chipPad: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
   },
   chipActive: {
-    backgroundColor: "#5b5bf0",
-    borderColor: "#5b5bf0",
+    borderRadius: radius.pill,
+    overflow: "hidden",
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  chipSheen: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 14,
   },
   chipText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#9a9aa5",
+    fontFamily: font.sansSemi,
+    fontSize: 13,
+    letterSpacing: -0.1,
+    color: color.textDim,
   },
   chipTextActive: {
     color: "#fff",
   },
   list: {
-    gap: 8,
+    gap: space.sm,
   },
   row: {
+    overflow: "hidden",
+  },
+  rowPast: {
+    opacity: 0.42,
+  },
+  rail: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    zIndex: 1,
+  },
+  rowBody: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "#16161b",
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    gap: space.md,
+    paddingHorizontal: space.lg,
     paddingVertical: 14,
-    gap: 12,
   },
-  rowLive: {
-    backgroundColor: "#1c1c2b",
-    borderWidth: 1,
-    borderColor: "#5b5bf0",
-  },
-  rowPast: {
-    backgroundColor: "#131317",
-    opacity: 0.55,
-  },
-  textPast: {
-    color: "#8a8a94",
+  rowBodyLive: {
+    paddingLeft: space.lg + 4,
+    paddingVertical: 15,
   },
   rowMain: {
     flex: 1,
@@ -315,39 +485,58 @@ const styles = StyleSheet.create({
   nowBadge: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    marginBottom: 2,
-  },
-  nowDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 999,
-    backgroundColor: "#5b5bf0",
+    gap: space.sm,
+    marginBottom: space.xs,
   },
   nowText: {
-    fontSize: 11,
-    fontWeight: "700",
-    letterSpacing: 0.4,
+    fontFamily: font.sansBold,
+    fontSize: 10,
+    letterSpacing: 1.1,
     textTransform: "uppercase",
-    color: "#8f8ff5",
+    color: color.magenta,
   },
   artist: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#fff",
+    fontFamily: font.displayBold,
+    fontSize: 18,
+    letterSpacing: -0.4,
+    color: color.text,
   },
   rowStage: {
-    fontSize: 13,
-    color: "#71717c",
+    fontFamily: font.sans,
+    fontSize: 12.5,
+    color: color.textFaint,
   },
-  setTime: {
-    fontSize: 14,
-    color: "#9a9aa5",
+  textPast: {
+    color: color.textDim,
+  },
+  // Times stack rather than run inline, so the start time — the thing you
+  // actually scan for — sits on its own baseline in mono.
+  timeBlock: {
+    alignItems: "flex-end",
+  },
+  timeStart: {
+    fontFamily: font.monoBold,
+    fontSize: 13,
+    letterSpacing: -0.4,
+    color: color.text,
+  },
+  timeEnd: {
+    fontFamily: font.mono,
+    fontSize: 11,
+    letterSpacing: -0.3,
+    color: color.textFaint,
+  },
+  emptyCard: {
+    marginTop: space.xl,
+  },
+  emptyBody: {
+    padding: space.xl,
+    gap: space.md,
   },
   empty: {
-    marginTop: 16,
+    fontFamily: font.sans,
     fontSize: 15,
-    color: "#71717c",
     lineHeight: 22,
+    color: color.textDim,
   },
 });

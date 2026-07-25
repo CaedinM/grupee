@@ -1,7 +1,10 @@
 import { useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Text, TextInput, View } from "react-native";
 
 import { ApiError, getGroup, joinGroup, type Group } from "../api";
+import { useTabBarClearance } from "../TabBar";
+import { GlassButton, GlassSurface, Reveal } from "../ui/Glass";
+import { radius, space, type } from "../ui/theme";
 import BackLink from "./BackLink";
 import { styles } from "./styles";
 
@@ -26,6 +29,7 @@ export default function JoinForm({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const clearance = useTabBarClearance();
 
   const cleaned = code.trim().toUpperCase();
 
@@ -43,30 +47,47 @@ export default function JoinForm({
   };
 
   return (
-    <View style={styles.card}>
-      <BackLink onPress={onBack} />
-      <Text style={styles.title}>Enter the code</Text>
-      <Text style={styles.subtitle}>Ask a group member for their 4-letter code.</Text>
-      <TextInput
-        style={[styles.input, styles.codeInput]}
-        placeholder="ABCD"
-        placeholderTextColor="#55555f"
-        value={code}
-        onChangeText={(t) => setCode(t.toUpperCase())}
-        autoCapitalize="characters"
-        autoCorrect={false}
-        maxLength={4}
-        onSubmitEditing={submit}
-        returnKeyType="go"
-      />
-      <Pressable
-        style={[styles.button, (cleaned.length !== 4 || busy) && styles.buttonDisabled]}
-        onPress={submit}
-        disabled={cleaned.length !== 4 || busy}
-      >
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Join</Text>}
-      </Pressable>
-      {error && <Text style={styles.error}>{error}</Text>}
+    <View style={[styles.card, { paddingBottom: clearance }]}>
+      <View style={styles.backSlot}>
+        <BackLink onPress={onBack} />
+      </View>
+
+      <Reveal>
+        <Text style={styles.eyebrow}>Join a crew</Text>
+        <Text style={type.hero}>Enter the code</Text>
+        <Text style={[styles.subtitle, { marginTop: space.sm }]}>
+          Four letters, from anyone already in the group.
+        </Text>
+      </Reveal>
+
+      <Reveal delay={100}>
+        {/* Four slots' worth of tracking, so the code lands on a fixed grid
+            as it's typed rather than sliding as each glyph arrives. */}
+        <GlassSurface r={radius.lg} sunken>
+          <TextInput
+            style={[styles.input, styles.codeInput]}
+            placeholder="ABCD"
+            placeholderTextColor="rgba(255,255,255,0.13)"
+            value={code}
+            onChangeText={(t) => setCode(t.toUpperCase())}
+            autoCapitalize="characters"
+            autoCorrect={false}
+            maxLength={4}
+            onSubmitEditing={submit}
+            returnKeyType="go"
+          />
+        </GlassSurface>
+      </Reveal>
+
+      <Reveal delay={180} style={{ gap: space.md }}>
+        <GlassButton
+          label="Join"
+          onPress={submit}
+          disabled={cleaned.length !== 4 || busy}
+          busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+        />
+        {error && <Text style={styles.error}>{error}</Text>}
+      </Reveal>
     </View>
   );
 }

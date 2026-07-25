@@ -50,8 +50,22 @@ class S3Storage:
         public_url: str | None,
     ):
         import boto3  # imported lazily so local dev doesn't require it configured
+        from botocore.config import Config
 
-        self.client = boto3.client("s3", region_name=region, endpoint_url=endpoint_url)
+        # Cloudflare R2 (any non-AWS endpoint) rejects the CRC32 upload trailers
+        # botocore now adds by default, so pin checksums to "when_required" —
+        # SigV4 already signs the body. Harmless on AWS; only set for a custom
+        # endpoint so real S3 keeps its defaults.
+        config = None
+        if endpoint_url:
+            config = Config(
+                signature_version="s3v4",
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            )
+        self.client = boto3.client(
+            "s3", region_name=region, endpoint_url=endpoint_url, config=config
+        )
         self.bucket = bucket
         self.region = region
         self.endpoint_url = endpoint_url.rstrip("/") if endpoint_url else None

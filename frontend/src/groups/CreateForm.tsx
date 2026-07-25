@@ -1,8 +1,19 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 
 import { ApiError, createGroup, listEvents, type FestivalEvent, type Group } from "../api";
+import { useTabBarClearance } from "../TabBar";
+import { GlassButton, GlassSurface, Reveal, usePressScale } from "../ui/Glass";
+import { color, radius, space, type } from "../ui/theme";
 import BackLink from "./BackLink";
 import { hasNotEnded } from "./events";
 import { styles } from "./styles";
@@ -19,6 +30,7 @@ export default function CreateForm({
   const [eventId, setEventId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const clearance = useTabBarClearance();
 
   useEffect(() => {
     let cancelled = false;
@@ -60,52 +72,100 @@ export default function CreateForm({
   };
 
   return (
-    <View style={styles.card}>
+    <ScrollView
+      style={styles.scroll}
+      contentContainerStyle={[styles.formContent, { paddingBottom: clearance + space.lg }]}
+      showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
+    >
       <BackLink onPress={onBack} />
-      <Text style={styles.title}>Name your group</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Group name"
-        placeholderTextColor="#55555f"
-        value={name}
-        onChangeText={setName}
-        autoCapitalize="words"
-        maxLength={40}
-        returnKeyType="done"
-      />
 
-      <Text style={styles.sectionHeader}>Which festival?</Text>
-      {events === null ? (
-        <ActivityIndicator color="#5b5bf0" />
-      ) : events.length === 0 ? (
-        <Text style={styles.subtitle}>No upcoming festivals yet.</Text>
-      ) : (
-        events.map((event) => {
-          const selected = event.id === eventId;
-          return (
-            <Pressable
+      <Reveal>
+        <Text style={styles.eyebrow}>New crew</Text>
+        <Text style={type.hero}>Name your group</Text>
+      </Reveal>
+
+      <Reveal delay={80}>
+        <GlassSurface r={radius.md} sunken>
+          <TextInput
+            style={styles.input}
+            placeholder="The Sunday Lads"
+            placeholderTextColor={color.textFaint}
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="words"
+            maxLength={40}
+            returnKeyType="done"
+          />
+        </GlassSurface>
+      </Reveal>
+
+      <Reveal delay={140}>
+        <Text style={styles.sectionHeader}>Which festival?</Text>
+        {events === null ? (
+          <ActivityIndicator color={color.accentSoft} style={{ alignSelf: "flex-start" }} />
+        ) : events.length === 0 ? (
+          <Text style={styles.subtitle}>No upcoming festivals yet.</Text>
+        ) : (
+          events.map((event) => (
+            <EventOption
               key={event.id}
-              style={[styles.eventOption, selected && styles.eventOptionSelected]}
+              event={event}
+              selected={event.id === eventId}
               onPress={() => setEventId(event.id)}
-            >
-              <Ionicons name="musical-notes" size={18} color={selected ? "#8b8bf5" : "#71717c"} />
-              <Text style={[styles.eventOptionText, selected && styles.eventOptionTextSelected]}>
-                {event.name}
-              </Text>
-              {selected && <Ionicons name="checkmark-circle" size={20} color="#8b8bf5" />}
-            </Pressable>
-          );
-        })
-      )}
+            />
+          ))
+        )}
+      </Reveal>
 
-      <Pressable
-        style={[styles.button, (!ready || busy) && styles.buttonDisabled]}
-        onPress={submit}
-        disabled={!ready || busy}
-      >
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Create</Text>}
+      <Reveal delay={200} style={{ gap: space.md, marginTop: space.sm }}>
+        <GlassButton
+          label="Create group"
+          onPress={submit}
+          disabled={!ready || busy}
+          busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+        />
+        {error && <Text style={styles.error}>{error}</Text>}
+      </Reveal>
+    </ScrollView>
+  );
+}
+
+/** A festival, as a selectable pane. Selection lights the rim and the icon. */
+function EventOption({
+  event,
+  selected,
+  onPress,
+}: {
+  event: FestivalEvent;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.98);
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+        <GlassSurface
+          r={radius.md}
+          intensity={selected ? 52 : 34}
+          raised={selected}
+          style={[styles.eventOption, selected && styles.eventOptionSelected]}
+        >
+          <View style={styles.eventOptionBody}>
+            <Ionicons
+              name="musical-notes"
+              size={17}
+              color={selected ? color.accentSoft : color.textFaint}
+            />
+            <Text style={[styles.eventOptionText, selected && styles.eventOptionTextSelected]}>
+              {event.name}
+            </Text>
+            {selected && (
+              <Ionicons name="checkmark-circle" size={20} color={color.accentSoft} />
+            )}
+          </View>
+        </GlassSurface>
       </Pressable>
-      {error && <Text style={styles.error}>{error}</Text>}
-    </View>
+    </Animated.View>
   );
 }

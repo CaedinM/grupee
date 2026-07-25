@@ -9,6 +9,7 @@ import {
   type User,
   type UserGroup,
 } from "../api";
+import { color } from "../ui/theme";
 import { type EventLiveness } from "../useEventLiveness";
 import Chooser from "./Chooser";
 import CodeReveal from "./CodeReveal";
@@ -100,7 +101,7 @@ export default function GroupsScreen({
     case "loading":
       return (
         <View style={styles.center}>
-          <ActivityIndicator color="#5b5bf0" />
+          <ActivityIndicator color={color.accentSoft} />
         </View>
       );
     case "chooser":

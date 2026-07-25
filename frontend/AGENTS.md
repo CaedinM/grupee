@@ -23,16 +23,26 @@ gets a degraded map. Backend contract and the hot paths it cares about are in
 ## Commands
 
 ```bash
-npm start        # Expo dev server; scan the QR with Expo Go
-npm run ios      # simulator
-npm run web      # browser (no real map — see the platform-split bullet)
-npx tsc --noEmit # the only automated check in this package
+npm start          # Expo dev server; backend URL from .env (or LAN fallback)
+npm run start:staging  # …forced at the Railway staging backend (clears Metro cache)
+npm run start:prod     # …forced at the Railway production backend (clears Metro cache)
+npm run ios        # simulator
+npm run web        # browser (no real map — see the platform-split bullet)
+npx tsc --noEmit   # the only automated check in this package
 ```
 
 There is no test suite, linter, or build step. `npx tsc --noEmit` is the gate — run it
 before calling a change done. `.env` holds `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and the
-optional `EXPO_PUBLIC_API_URL`; Expo only reads it at `npm start`, so a key change needs a
-restart.
+optional `EXPO_PUBLIC_API_URL`; Expo only reads it at start, so a key change needs a restart.
+
+**Which backend a run targets** is `EXPO_PUBLIC_API_URL`. Expo has no arbitrary `--mode`,
+so `start:staging` / `start:prod` set that var **inline** in the script (an inline env var
+wins over `.env` in Expo's loader) and pass `--clear` — required, because the URL is inlined
+into the bundle and Metro caches it, so switching environments without clearing keeps serving
+the old host. Plain `npm start` uses whatever `.env` says, and falls back to the Expo
+dev-server's LAN IP (`resolveBaseUrl` in `src/api.ts`) when the var is unset. Confirm the live
+value in the app's **Profile tab** (`ProfileScreen.tsx` renders `BASE_URL`). The full staging
+vs production story — including the parallel `admin` scripts — is in `../README.md`.
 
 ## Architecture
 
@@ -77,7 +87,19 @@ Cross-file invariants that matter when changing things:
   never offered as an option.
 - **All three screens stay mounted**, hidden with `display: "none"` rather than unmounted,
   so the map keeps its camera position across tab switches. Anything expensive in a screen
-  must therefore be gated on props, not on mount.
+  must therefore be gated on props, not on mount. A corollary for animation: an entrance
+  transition on a tab screen's root only ever plays once, at app start, so `Reveal` belongs
+  on things that genuinely mount — the groups flow's steps, the settings sheet, a list
+  re-keyed on a filter — not on the tab screens themselves.
+- **The tab bar floats over the screens; it does not reserve a row.** `TabBar` is rendered
+  into an absolutely-positioned layer at the bottom of `SignedInApp` with
+  `pointerEvents="box-none"`, so every screen runs full-bleed to the bottom of the display
+  and the map reaches the bottom edge with the capsule hovering in front of it. The cost is
+  that the bar *occludes*: every screen owes itself `useTabBarClearance()` (exported from
+  `TabBar.tsx`) worth of bottom padding — as `contentContainerStyle` padding on the
+  scrollable screens, as `paddingBottom` on the fixed ones. `MapScreen`'s two bottom-anchored
+  controls (`recenter`, `errorBanner`) take their `bottom` inline from the same hook, so the
+  bar's height stays a one-constant change (`TAB_BAR_BASE`).
 - **Platform split via filename**: `MapScreen.web.tsx` shadows `MapScreen.tsx` on web
   because `react-native-maps` has no web support, so web renders a telemetry list instead.
   A change to the map screen's props or empty states needs applying to both files.
@@ -129,14 +151,46 @@ Cross-file invariants that matter when changing things:
   interval), which is how the event-id gating still works. The hot paths (location PUT, group
   locations GET) are deliberately NOT cached — they're live per-user data. `ProfileGate`'s
   profile load in `App.tsx` predates this helper and stays hand-rolled (it interleaves a
-  name-screen fallback), but new cold resources should use `useCachedResource`.
+  name-screen fallback), but new cold resources should use `useCachedResource`. Its cache is
+  keyed per Clerk account (`wta.user.<clerkUserId>`) and self-invalidates: a 404 from the
+  background `getMe()` refresh means the profile is gone server-side (account deleted, or the
+  backend repointed at a fresh database), so the entry is dropped and the user falls to
+  `NameScreen` to re-provision. Only 404 invalidates — offline/5xx keep the cache, which is
+  what lets the app open without a network.
 - **Avatars come back in two forms** — absolute URLs from S3, host-relative paths from
   local-disk dev storage. Always render them through `avatarUri` / `avatarSource`, which
   normalize both.
-- **Styling is per-file `StyleSheet.create` with no design system.** The one exception is
-  `src/groups/styles.ts`, shared by every file in that folder — those screens are steps in
-  one flow and share their card/title/button look, so a per-file split there would just
-  duplicate the same primitives six times. Match the existing dark palette: `#101014`
-  background, `#1c1c22` surfaces, `#2a2a32` borders, `#5b5bf0` accent (`#8b8bf5` for text on
-  dark), `#9a9aa5` / `#71717c` secondary text, `#ff6b6b` errors. Icons are
-  `@expo/vector-icons`' Ionicons.
+- **Everything outside the map is styled from the "Nightglass" system in `src/ui/`.**
+  `theme.ts` holds the tokens (`color`, `glass`, `ramp`, `radius`, `space`, `type`, `font`,
+  `shadow`) and `Glass.tsx` the primitives (`Aurora`, `GlassSurface`, `GlassCard`,
+  `GlassButton`, `Reveal`, `PulseDot`, `usePressScale`). Compose those rather than
+  hand-rolling a surface; per-file `StyleSheet.create` is still where layout and type live,
+  but it should reference tokens instead of literals. `src/groups/styles.ts` stays shared by
+  that folder for the same reason as before — those screens are steps in one flow.
+- **The material only works because of the layers, so don't flatten them.** A pane is a
+  `BlurView` + a near-transparent white wash + a `sheen` falling from the top edge + a
+  specular hairline along the rim + a hairline border and a wide soft shadow. Drop the sheen
+  and specular and it stops reading as glass and starts reading as a translucent box.
+  Critically, **panes have no colour of their own**: `Aurora` is painted once in `App.tsx`
+  behind the whole screen stack and is the only thing supplying hue, so a surface that sets
+  an opaque `backgroundColor` punches a hole in the design.
+- **The map is split into chrome and map, and only the chrome is themed.** Everything
+  rendered *inside* `MapView` — the `AvatarMarker`s and their labels, `LandmarkMarker`'s
+  badge and label, the boundary `Polygon` and its event label, `LANDMARK_ICONS` — keeps its
+  own map-cartography palette (teal `#14b8a6` landmarks, orange members, indigo self, white
+  text haloes) and is deliberately *not* on Nightglass tokens: those marks have to read
+  against Apple's pale `mutedStandard` tiles, not against the Aurora. Everything overlaid on
+  top of the map — the group/event and landmark pills, the upcoming/ended message cards, the
+  error banner, the recenter button, the `StageBubble`, and the pre-GPS-fix waiting screen —
+  is Nightglass glass. Keep that line when editing this screen.
+- **Glass over the map needs `scrim`.** `GlassSurface`'s `scrim` prop lays a black wash under
+  the white one, because a blur of a pale map has no contrast for light text. Map chrome
+  passes `MAP_SCRIM`; nothing over the Aurora needs it.
+- **Type is three loaded families, addressed per weight.** Bricolage Grotesque for display
+  (titles, names, artists), Geist for UI, Geist Mono for join codes, set times, and ids.
+  They load in `App.tsx` via `useNightglassFonts`, which gates first render — every
+  `fontFamily` token is inert until it resolves. Always set `fontFamily` and **never**
+  `fontWeight` alongside it: the combination makes Android synthesize the wrong face.
+- Palette: `#07070B` substrate, `#6E6BFF`→`#A855F7` accent ramp, `#FF4D8D` for live/now
+  states, `#5EEAD4` for landmarks (unchanged, so the map and the groups list still agree),
+  `#FF7A7A` errors. Icons are `@expo/vector-icons`' Ionicons.

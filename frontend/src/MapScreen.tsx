@@ -13,6 +13,9 @@ import {
   type User,
 } from "./api";
 import { landmarksContaining } from "./geo";
+import { useTabBarClearance } from "./TabBar";
+import { GlassButton, GlassSurface, PulseDot, Reveal, usePressScale } from "./ui/Glass";
+import { color, font, glass, radius, space, type as typeScale } from "./ui/theme";
 import { useEventLandmarks } from "./useEventLandmarks";
 import { currentSetForLandmark, upcomingSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
@@ -97,6 +100,11 @@ function formatStartsAt(iso: string): string {
 // (iOS) / zoom (Android) put it low enough that they actually appear.
 const CAMERA_TILT = { pitch: 55, heading: 0, altitude: 700, zoom: 17 };
 
+// Map chrome is the one place glass floats over something bright rather than
+// over the Aurora — `mutedStandard` is a pale map. Without a scrim under the
+// wash, light text on a blur of it has no contrast.
+const MAP_SCRIM = 0.46;
+
 export default function MapScreen({
   user,
   reporting,
@@ -116,6 +124,9 @@ export default function MapScreen({
   const { members, error: groupError } = useGroupLocations(live ? (group?.id ?? null) : null);
   const mapRef = useRef<MapView>(null);
   const insets = useSafeAreaInsets();
+  // The tab bar floats over the map, so the bottom-anchored controls position
+  // themselves above it rather than against the screen edge.
+  const clearance = useTabBarClearance();
 
   // Which stage's info bubble is open, and where to anchor it (screen pixels).
   // We render the bubble ourselves as an overlay rather than using a native
@@ -184,14 +195,24 @@ export default function MapScreen({
   if (!coordinate) {
     return (
       <View style={styles.waiting}>
-        <Text style={styles.waitingTitle}>Hey, {user.display_name}</Text>
-        <Text style={styles.waitingText}>
-          {permission === "asking" && "Requesting location access…"}
-          {permission === "granted" && "Waiting for a GPS fix…"}
-          {permission === "denied" &&
-            "Location permission denied. Enable it in Settings to share your position."}
-        </Text>
-        {error && <Text style={styles.error}>{error}</Text>}
+        <Reveal style={styles.waitingBlock}>
+          <Text style={styles.waitingEyebrow}>
+            {permission === "denied" ? "Location off" : "Locating"}
+          </Text>
+          <Text style={typeScale.hero}>Hey, {user.display_name}</Text>
+          <GlassSurface r={radius.lg} style={styles.waitingCard}>
+            <View style={styles.waitingBody}>
+              {permission !== "denied" && <PulseDot color={color.accentSoft} />}
+              <Text style={styles.waitingText}>
+                {permission === "asking" && "Requesting location access…"}
+                {permission === "granted" && "Waiting for a GPS fix…"}
+                {permission === "denied" &&
+                  "Location permission denied. Enable it in Settings to share your position."}
+              </Text>
+            </View>
+          </GlassSurface>
+          {error && <Text style={styles.error}>{error}</Text>}
+        </Reveal>
       </View>
     );
   }
@@ -276,21 +297,7 @@ export default function MapScreen({
           joining one. */}
       {group && (
         <View style={[styles.headerStack, { top: insets.top + 12 }]} pointerEvents="box-none">
-          <Pressable style={styles.headerPill} onPress={onOpenGroups}>
-            <Ionicons name="people" size={14} color="#8b8bf5" />
-            <Text style={styles.headerGroup} numberOfLines={1}>
-              {group.name}
-            </Text>
-            {liveness.event && (
-              <>
-                <View style={styles.headerDivider} />
-                <Ionicons name="location" size={14} color="#8b8bf5" />
-                <Text style={styles.headerGroup} numberOfLines={1}>
-                  {liveness.event.name}
-                </Text>
-              </>
-            )}
-          </Pressable>
+          <GroupPill group={group} eventName={liveness.event?.name ?? null} onPress={onOpenGroups} />
 
           {/* One pill per landmark geofence the user is standing in. When the
               event is live and it's a stage, the set currently on shows next to
@@ -299,20 +306,33 @@ export default function MapScreen({
             const playing =
               live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
             return (
-              <View key={l.id} style={styles.landmarkPill}>
-                <Ionicons name={LANDMARK_ICONS[l.kind] ?? "location"} size={13} color="#5eead4" />
-                <Text style={styles.landmarkPillText} numberOfLines={1}>
-                  {l.name}
-                </Text>
-                {playing && (
-                  <>
-                    <View style={styles.headerDivider} />
-                    <Text style={styles.landmarkPillArtist} numberOfLines={1}>
-                      {playing.artist}
-                    </Text>
-                  </>
-                )}
-              </View>
+              <GlassSurface
+                key={l.id}
+                r={radius.pill}
+                intensity={60}
+                scrim={MAP_SCRIM}
+                style={styles.pillShell}
+              >
+                <View style={styles.landmarkPill}>
+                  <Ionicons
+                    name={LANDMARK_ICONS[l.kind] ?? "location"}
+                    size={13}
+                    color={color.teal}
+                  />
+                  <Text style={styles.landmarkPillText} numberOfLines={1}>
+                    {l.name}
+                  </Text>
+                  {playing && (
+                    <>
+                      <View style={styles.headerDivider} />
+                      <PulseDot />
+                      <Text style={styles.landmarkPillArtist} numberOfLines={1}>
+                        {playing.artist}
+                      </Text>
+                    </>
+                  )}
+                </View>
+              </GlassSurface>
             );
           })}
         </View>
@@ -320,45 +340,124 @@ export default function MapScreen({
 
       {(liveness.status === "none" || liveness.status === "ended") && (
         <View style={styles.overlayWrap} pointerEvents="box-none">
-          <View style={styles.overlayCard}>
-            {liveness.status === "ended" && liveness.event && (
-              <Text style={styles.overlayTitle}>{liveness.event.name} has ended</Text>
-            )}
-            <Text style={styles.overlayText}>
-              Use this page to track your group at your next event — go to My Groups to join your
-              friends.
-            </Text>
-            <Pressable style={styles.groupsButton} onPress={onOpenGroups}>
-              <Ionicons name="people" size={16} color="#fff" />
-              <Text style={styles.groupsButtonText}>Go to My Groups</Text>
-            </Pressable>
-          </View>
+          <Reveal style={styles.overlayReveal}>
+            <GlassSurface r={radius.xl} intensity={70} scrim={0.55} raised>
+              <View style={styles.overlayCard}>
+                <View style={styles.overlayIcon}>
+                  <Ionicons
+                    name={liveness.status === "ended" ? "flag" : "people"}
+                    size={22}
+                    color={color.accentSoft}
+                  />
+                </View>
+                <Text style={styles.overlayEyebrow}>
+                  {liveness.status === "ended" ? "That's a wrap" : "No crew yet"}
+                </Text>
+                {liveness.status === "ended" && liveness.event && (
+                  <Text style={styles.overlayTitle}>{liveness.event.name} has ended</Text>
+                )}
+                <Text style={styles.overlayText}>
+                  Use this page to track your group at your next event — go to My Groups to join
+                  your friends.
+                </Text>
+                <GlassButton
+                  label="Go to My Groups"
+                  onPress={onOpenGroups}
+                  icon={<Ionicons name="people" size={17} color="#fff" />}
+                  style={styles.overlayButton}
+                />
+              </View>
+            </GlassSurface>
+          </Reveal>
         </View>
       )}
 
       {liveness.status === "upcoming" && liveness.event && (
         <View style={styles.overlayWrap} pointerEvents="box-none">
-          <View style={styles.overlayCard}>
-            <Text style={styles.overlayTitle}>{liveness.event.name} has not started yet</Text>
-            <Text style={styles.overlayText}>
-              {liveness.event.starts_at
-                ? `Check back at ${formatStartsAt(liveness.event.starts_at)} to see where your friends are at.`
-                : "Check back once it starts to see where your friends are at."}
-            </Text>
-          </View>
+          <Reveal style={styles.overlayReveal}>
+            <GlassSurface r={radius.xl} intensity={70} scrim={0.55} raised>
+              <View style={styles.overlayCard}>
+                <View style={styles.overlayIcon}>
+                  <Ionicons name="hourglass" size={22} color={color.accentSoft} />
+                </View>
+                <Text style={styles.overlayEyebrow}>Not started</Text>
+                <Text style={styles.overlayTitle}>{liveness.event.name}</Text>
+                <Text style={styles.overlayText}>
+                  {liveness.event.starts_at
+                    ? `Check back at ${formatStartsAt(liveness.event.starts_at)} to see where your friends are at.`
+                    : "Check back once it starts to see where your friends are at."}
+                </Text>
+              </View>
+            </GlassSurface>
+          </Reveal>
         </View>
       )}
 
       {displayedError && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorBannerText}>{displayedError}</Text>
+        <View style={[styles.errorBanner, { bottom: clearance + 68 }]} pointerEvents="box-none">
+          <GlassSurface r={radius.md} intensity={60} scrim={0.5} style={styles.errorShell}>
+            <View style={styles.errorBannerBody}>
+              <Ionicons name="alert-circle" size={16} color={color.danger} />
+              <Text style={styles.errorBannerText}>{displayedError}</Text>
+            </View>
+          </GlassSurface>
         </View>
       )}
 
-      <Pressable style={styles.recenter} onPress={recenter} hitSlop={8}>
-        <Text style={styles.recenterIcon}>◎</Text>
-      </Pressable>
+      <RecenterButton onPress={recenter} bottom={clearance + 16} />
     </View>
+  );
+}
+
+/** The group / event pill. Tapping it jumps to the groups tab. */
+function GroupPill({
+  group,
+  eventName,
+  onPress,
+}: {
+  group: Group;
+  eventName: string | null;
+  onPress: () => void;
+}) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.96);
+  return (
+    <Animated.View style={[{ transform: [{ scale }] }, styles.pillShell]}>
+      <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+        <GlassSurface r={radius.pill} intensity={60} scrim={MAP_SCRIM}>
+          <View style={styles.headerPill}>
+            <Ionicons name="people" size={14} color={color.accentSoft} />
+            <Text style={styles.headerGroup} numberOfLines={1}>
+              {group.name}
+            </Text>
+            {eventName && (
+              <>
+                <View style={styles.headerDivider} />
+                <Ionicons name="musical-notes" size={13} color={color.accentSoft} />
+                <Text style={styles.headerEvent} numberOfLines={1}>
+                  {eventName}
+                </Text>
+              </>
+            )}
+          </View>
+        </GlassSurface>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/** Snap-back-to-me. A round glass button, offset clear of the floating tab bar. */
+function RecenterButton({ onPress, bottom }: { onPress: () => void; bottom: number }) {
+  const { scale, onPressIn, onPressOut } = usePressScale(0.9);
+  return (
+    <Animated.View style={[styles.recenter, { bottom, transform: [{ scale }] }]}>
+      <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut} hitSlop={8}>
+        <GlassSurface r={radius.pill} intensity={62} scrim={MAP_SCRIM}>
+          <View style={styles.recenterInner}>
+            <Ionicons name="locate" size={21} color={color.text} />
+          </View>
+        </GlassSurface>
+      </Pressable>
+    </Animated.View>
   );
 }
 
@@ -510,15 +609,24 @@ function StageBubble({ selection }: { selection: SelectedStage }) {
           },
         ]}
       >
-        <Text style={styles.calloutStage} numberOfLines={1}>
-          {landmark.name}
-        </Text>
-        <Text style={styles.calloutHeading}>{callout.heading}</Text>
-        {callout.artist && (
-          <Text style={styles.calloutArtist} numberOfLines={2}>
-            {callout.artist}
-          </Text>
-        )}
+        {/* The glass is inside the measured/positioned wrapper, so it sizes to
+            its content and the anchor maths above is unaffected. */}
+        <GlassSurface r={radius.md} intensity={68} scrim={0.55} raised>
+          <View style={styles.calloutBody}>
+            <Text style={styles.calloutStage} numberOfLines={1}>
+              {landmark.name}
+            </Text>
+            <View style={styles.calloutHeadingRow}>
+              {callout.heading === "Now playing" && <PulseDot />}
+              <Text style={styles.calloutHeading}>{callout.heading}</Text>
+            </View>
+            {callout.artist && (
+              <Text style={styles.calloutArtist} numberOfLines={2}>
+                {callout.artist}
+              </Text>
+            )}
+          </View>
+        </GlassSurface>
       </Animated.View>
     </View>
   );
@@ -528,64 +636,89 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  // Transparent, not opaque: the app-wide Aurora is this screen's backdrop
+  // until there's a fix to draw a map against.
   waiting: {
     flex: 1,
-    backgroundColor: "#101014",
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
-    gap: 12,
+    padding: space.xl,
   },
-  waitingTitle: {
-    fontSize: 28,
-    fontWeight: "800",
-    color: "#fff",
+  waitingBlock: {
+    width: "100%",
+    maxWidth: 420,
+    gap: space.md,
+  },
+  waitingEyebrow: {
+    ...typeScale.label,
+    color: color.accentSoft,
+    marginBottom: space.sm,
+  },
+  waitingCard: {
+    marginTop: space.sm,
+  },
+  waitingBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    padding: space.lg,
   },
   waitingText: {
-    fontSize: 16,
-    color: "#9a9aa5",
-    textAlign: "center",
+    flex: 1,
+    fontFamily: font.sans,
+    fontSize: 15,
+    lineHeight: 21,
+    color: color.textDim,
   },
   overlayWrap: {
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    padding: 24,
+    padding: space.xl,
+  },
+  overlayReveal: {
+    width: "100%",
+    maxWidth: 340,
   },
   overlayCard: {
     alignItems: "center",
-    gap: 10,
-    backgroundColor: "rgba(16, 16, 20, 0.92)",
-    borderRadius: 16,
-    paddingHorizontal: 20,
-    paddingVertical: 18,
-    maxWidth: 320,
+    gap: space.sm,
+    paddingHorizontal: space.xl,
+    paddingVertical: space.xl,
+  },
+  overlayIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(167,158,255,0.14)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: glass.stroke,
+    marginBottom: space.xs,
+  },
+  overlayEyebrow: {
+    ...typeScale.label,
+    color: color.accentSoft,
   },
   overlayTitle: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#fff",
+    fontFamily: font.display,
+    fontSize: 21,
+    lineHeight: 25,
+    letterSpacing: -0.6,
+    color: color.text,
     textAlign: "center",
   },
   overlayText: {
-    fontSize: 15,
-    color: "#c6c6cf",
+    fontFamily: font.sans,
+    fontSize: 14.5,
+    lineHeight: 21,
+    color: color.textDim,
     textAlign: "center",
   },
-  groupsButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    backgroundColor: "#5b5bf0",
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    marginTop: 8,
-  },
-  groupsButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+  overlayButton: {
+    alignSelf: "stretch",
+    marginTop: space.md,
   },
   markerWrap: {
     alignItems: "center",
@@ -637,35 +770,39 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(255, 255, 255, 0.9)",
     textShadowRadius: 3,
   },
-  // Tooltip-style callout (no default OS bubble), matching the app's dark
-  // surface palette. Width-bounded so long artist names wrap instead of
+  // Tooltip-style callout (no default OS bubble), drawn as glass like the rest
+  // of the map chrome. Width-bounded so long artist names wrap instead of
   // stretching the map.
   calloutBubble: {
-    backgroundColor: "#1c1c22",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#2a2a32",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    maxWidth: 200,
-    gap: 2,
+    maxWidth: 210,
+  },
+  calloutBody: {
+    paddingHorizontal: space.lg,
+    paddingVertical: space.md,
+    gap: 3,
   },
   calloutStage: {
-    color: "#5eead4",
+    fontFamily: font.sansSemi,
+    color: color.teal,
     fontSize: 12,
-    fontWeight: "700",
+  },
+  calloutHeadingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
   },
   calloutHeading: {
-    color: "#9a9aa5",
-    fontSize: 11,
-    fontWeight: "600",
+    fontFamily: font.sansSemi,
+    color: color.textDim,
+    fontSize: 10,
     textTransform: "uppercase",
-    letterSpacing: 0.4,
+    letterSpacing: 1.1,
   },
   calloutArtist: {
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: "700",
+    fontFamily: font.displayBold,
+    color: color.text,
+    fontSize: 16,
+    letterSpacing: -0.3,
   },
   memberLabel: {
     maxWidth: 110,
@@ -684,86 +821,99 @@ const styles = StyleSheet.create({
     position: "absolute",
     alignSelf: "center",
     alignItems: "center",
-    gap: 6,
+    gap: space.sm,
     maxWidth: "92%",
+  },
+  // Caps the pill's width on the wrapper, so the glass clips to the same shape
+  // its content settles at.
+  pillShell: {
+    maxWidth: "100%",
   },
   headerPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(16, 16, 20, 0.85)",
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    maxWidth: "100%",
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingVertical: 9,
   },
   // Teal accent ties it to the landmark pins; sits directly under the group pill.
   landmarkPill: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: "rgba(16, 16, 20, 0.85)",
-    borderRadius: 20,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    maxWidth: "100%",
+    gap: space.sm,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
   },
   landmarkPillText: {
-    color: "#5eead4",
+    fontFamily: font.sansSemi,
+    color: color.teal,
     fontSize: 13,
-    fontWeight: "600",
     flexShrink: 1,
   },
   // The now-playing artist, brighter than the stage name it sits beside.
   landmarkPillArtist: {
-    color: "#fff",
+    fontFamily: font.sansSemi,
+    color: color.text,
     fontSize: 13,
-    fontWeight: "600",
     flexShrink: 1,
   },
   headerDivider: {
-    width: 1,
-    height: 14,
-    backgroundColor: "rgba(255, 255, 255, 0.25)",
+    width: StyleSheet.hairlineWidth,
+    height: 15,
+    backgroundColor: glass.strokeBright,
   },
   headerGroup: {
-    color: "#8b8bf5",
-    fontSize: 13,
-    fontWeight: "600",
+    fontFamily: font.sansSemi,
+    color: color.text,
+    fontSize: 13.5,
+    letterSpacing: -0.2,
     flexShrink: 1,
   },
+  headerEvent: {
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 13,
+    flexShrink: 1,
+  },
+  // `bottom` for this and the recenter button is set inline from
+  // useTabBarClearance — the tab bar floats over the map rather than docking
+  // beneath it, so both have to clear its capsule.
   errorBanner: {
     position: "absolute",
-    bottom: 100,
-    alignSelf: "center",
-    maxWidth: "85%",
-    backgroundColor: "rgba(127, 29, 29, 0.9)",
-    borderRadius: 12,
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    paddingHorizontal: space.xl,
+  },
+  errorShell: {
+    maxWidth: "100%",
+  },
+  errorBannerBody: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
   },
   errorBannerText: {
-    color: "#fecaca",
+    fontFamily: font.sansMedium,
+    color: color.danger,
     fontSize: 13,
+    flexShrink: 1,
   },
   recenter: {
     position: "absolute",
-    bottom: 24,
     right: 20,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(16, 16, 20, 0.85)",
+  },
+  recenterInner: {
+    width: 46,
+    height: 46,
     alignItems: "center",
     justifyContent: "center",
   },
-  recenterIcon: {
-    color: "#fff",
-    fontSize: 22,
-  },
   error: {
-    color: "#ff6b6b",
+    fontFamily: font.sansMedium,
+    color: color.danger,
     fontSize: 14,
-    textAlign: "center",
   },
 });

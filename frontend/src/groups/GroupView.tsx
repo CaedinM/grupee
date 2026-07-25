@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
 
 import {
   avatarUri,
@@ -13,6 +13,9 @@ import {
   type User,
 } from "../api";
 import { landmarksContaining } from "../geo";
+import { useTabBarClearance } from "../TabBar";
+import { GlassSurface, Reveal } from "../ui/Glass";
+import { color, radius, space, type } from "../ui/theme";
 import { useEventLandmarks } from "../useEventLandmarks";
 import type { EventLiveness } from "../useEventLiveness";
 import { useGroupLocations } from "../useGroupLocations";
@@ -35,6 +38,7 @@ export default function GroupView({
   const [detail, setDetail] = useState<GroupDetail | null>(null);
   const [event, setEvent] = useState<FestivalEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const clearance = useTabBarClearance();
 
   // Groups made since event selection landed always have one; older test
   // groups may not, so the chip just stays hidden for those.
@@ -107,56 +111,84 @@ export default function GroupView({
   };
 
   return (
-    <View style={styles.groupContainer}>
-      <Text style={styles.title}>{group.name}</Text>
-      {event && (
-        <View style={styles.eventChip}>
-          <Ionicons name="musical-notes" size={14} color="#8b8bf5" />
-          <Text style={styles.eventChipText}>{event.name}</Text>
-        </View>
-      )}
-      {creator && (
-        <Text style={styles.subtitle} numberOfLines={1}>
-          Created by {creator.display_name}
-          {creator.user_id === user.id ? " (you)" : ""}
+    <View style={[styles.groupContainer, { paddingBottom: clearance }]}>
+      <Reveal>
+        <Text style={styles.eyebrow}>Your crew</Text>
+        <Text style={type.hero} numberOfLines={2}>
+          {group.name}
         </Text>
-      )}
-      <CodeBadge code={group.code} groupName={group.name} />
-
-      <Text style={styles.sectionHeader}>Members{detail ? ` (${detail.members.length})` : ""}</Text>
-      <View style={styles.memberList}>
-        {detail === null ? (
-          <ActivityIndicator color="#5b5bf0" />
-        ) : (
-          detail.members.map((m) => (
-            <View key={m.user_id} style={styles.memberRow}>
-              {avatarUri(m.avatar_url) ? (
-                <Image source={avatarUri(m.avatar_url)!} style={styles.memberAvatar} />
-              ) : (
-                <View style={[styles.memberAvatar, styles.memberAvatarEmpty]}>
-                  <Ionicons name="person" size={16} color="#9a9aa5" />
-                </View>
-              )}
-              <Text style={styles.memberName} numberOfLines={1}>
-                {m.display_name}
-                {m.user_id === user.id ? " (you)" : ""}
-              </Text>
-              {landmarkByUser.has(m.user_id) && (
-                <View style={styles.memberLandmark}>
-                  <Ionicons name="location" size={12} color="#5eead4" />
-                  <Text style={styles.memberLandmarkText} numberOfLines={1}>
-                    {landmarkByUser.get(m.user_id)}
-                  </Text>
-                </View>
-              )}
-            </View>
-          ))
+        {creator && (
+          <Text style={[styles.subtitle, { marginTop: space.xs, fontSize: 14 }]} numberOfLines={1}>
+            Started by {creator.display_name}
+            {creator.user_id === user.id ? " (you)" : ""}
+          </Text>
         )}
-      </View>
+      </Reveal>
+
+      <Reveal delay={70} style={styles.metaRow}>
+        {event && (
+          <GlassSurface
+            r={radius.pill}
+            intensity={36}
+            sheen={false}
+            style={styles.eventChip}
+          >
+            <View style={styles.eventChipBody}>
+              <Ionicons name="musical-notes" size={13} color={color.accentSoft} />
+              <Text style={styles.eventChipText}>{event.name}</Text>
+            </View>
+          </GlassSurface>
+        )}
+        <CodeBadge code={group.code} groupName={group.name} />
+      </Reveal>
+
+      <Reveal delay={130} style={styles.memberSection}>
+        <Text style={styles.sectionHeader}>
+          Members{detail ? ` · ${detail.members.length}` : ""}
+        </Text>
+        <GlassSurface r={radius.lg} style={styles.memberList}>
+          {detail === null ? (
+            <View style={styles.memberLoading}>
+              <ActivityIndicator color={color.accentSoft} />
+            </View>
+          ) : (
+            <ScrollView
+              contentContainerStyle={styles.memberListBody}
+              showsVerticalScrollIndicator={false}
+            >
+              {detail.members.map((m) => (
+                <View key={m.user_id} style={styles.memberRow}>
+                  {avatarUri(m.avatar_url) ? (
+                    <Image source={avatarUri(m.avatar_url)!} style={styles.memberAvatar} />
+                  ) : (
+                    <View style={[styles.memberAvatar, styles.memberAvatarEmpty]}>
+                      <Ionicons name="person" size={17} color={color.textFaint} />
+                    </View>
+                  )}
+                  <Text style={styles.memberName} numberOfLines={1}>
+                    {m.display_name}
+                    {m.user_id === user.id ? (
+                      <Text style={styles.memberYou}> (you)</Text>
+                    ) : null}
+                  </Text>
+                  {landmarkByUser.has(m.user_id) && (
+                    <View style={styles.memberLandmark}>
+                      <Ionicons name="location" size={11} color={color.teal} />
+                      <Text style={styles.memberLandmarkText} numberOfLines={1}>
+                        {landmarkByUser.get(m.user_id)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </GlassSurface>
+      </Reveal>
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <Pressable style={styles.leaveButton} onPress={leave}>
+      <Pressable style={styles.leaveButton} onPress={leave} hitSlop={8}>
         <Text style={styles.leaveText}>Leave group</Text>
       </Pressable>
     </View>

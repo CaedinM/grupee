@@ -8,6 +8,7 @@ alembic==1.18.5
 pydantic==2.13.4
 python-multipart==0.0.32
 psycopg2-binary==2.9.12
+redis==8.0.1
 python-dotenv==1.2.2
 PyJWT[crypto]==2.13.0
 boto3==1.43.53

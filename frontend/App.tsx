@@ -5,7 +5,6 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -28,17 +27,26 @@ import MapScreen from "./src/MapScreen";
 import MyEventScreen from "./src/MyEventScreen";
 import ProfileScreen from "./src/ProfileScreen";
 import TabBar, { type Tab } from "./src/TabBar";
+import { useNightglassFonts } from "./src/ui/fonts";
+import { Aurora, GlassButton, GlassSurface, Reveal } from "./src/ui/Glass";
+import { color, font, radius, space, type } from "./src/ui/theme";
 import { useEventLiveness } from "./src/useEventLiveness";
 import { useLocationReporting } from "./src/useLocationReporting";
 
 const PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 export default function App() {
+  // Every `fontFamily` token in the theme is inert until these resolve, so the
+  // shell holds back rather than flashing a system-font frame first.
+  const fontsReady = useNightglassFonts();
+
   return (
     <SafeAreaProvider>
       <View style={styles.container}>
         <StatusBar style="light" />
-        {PUBLISHABLE_KEY ? (
+        {/* Painted once, behind everything: the light every pane refracts. */}
+        <Aurora />
+        {!fontsReady ? null : PUBLISHABLE_KEY ? (
           <ClerkProvider publishableKey={PUBLISHABLE_KEY} tokenCache={tokenCache}>
             <Root />
           </ClerkProvider>
@@ -58,7 +66,8 @@ function Root() {
   // go out without a token.
   setTokenGetter(isSignedIn ? getToken : null);
 
-  if (!isLoaded) return <View style={styles.container} />;
+  // Transparent, not opaque — the Aurora behind it is the loading state.
+  if (!isLoaded) return <View style={styles.screen} />;
   if (!isSignedIn) return <AuthScreen />;
   // Keyed by account so switching accounts never shows the previous
   // account's cached profile.
@@ -96,13 +105,25 @@ function ProfileGate({
         if (raw && !cancelled) {
           // The cache is the source of truth for rendering (so the app opens
           // offline), but a profile edited on another device would otherwise
-          // never catch up. Refresh in the background and ignore failures.
+          // never catch up. Refresh in the background.
           setProfile(JSON.parse(raw));
           getMe()
             .then((u) => {
               if (!cancelled) persistProfile(u);
             })
-            .catch(() => {});
+            .catch((e) => {
+              // 404 means the cached profile no longer exists server-side —
+              // the account was deleted, or the backend was pointed at a fresh
+              // database. Drop the stale cache and fall through to NameScreen,
+              // which re-provisions through the idempotent createUser; keeping
+              // it would leave the app rendering a user id the server doesn't
+              // have, and every user-scoped write would 404. Any other failure
+              // (offline, server down) keeps the cache so the app still opens.
+              if (e instanceof ApiError && e.status === 404) {
+                AsyncStorage.removeItem(cacheKey);
+                if (!cancelled) setProfile(null);
+              }
+            });
           return;
         }
         try {
@@ -123,7 +144,7 @@ function ProfileGate({
     };
   }, [cacheKey]);
 
-  if (!hydrated) return <View style={styles.container} />;
+  if (!hydrated) return <View style={styles.screen} />;
 
   if (!profile) return <NameScreen onRegistered={persistProfile} />;
 
@@ -154,7 +175,7 @@ function SignedInApp({
   // All screens stay mounted (hidden, not unmounted) so the map keeps its
   // camera position across tab switches.
   return (
-    <View style={styles.container}>
+    <View style={styles.screen}>
       <View style={[styles.screen, tab !== "groups" && styles.hidden]}>
         <GroupsScreen user={user} liveness={liveness} onGroupChange={setActiveGroup} />
       </View>
@@ -178,7 +199,13 @@ function SignedInApp({
           onReset={onSignOut}
         />
       </View>
-      <TabBar tab={tab} onChange={setTab} />
+      {/* Overlaid, not docked: every screen runs full-bleed to the bottom of
+          the display and the capsule floats in front of it. `box-none` keeps
+          the gaps around the capsule pass-through, so the map still pans
+          where the bar isn't. */}
+      <View style={styles.tabBarLayer} pointerEvents="box-none">
+        <TabBar tab={tab} onChange={setTab} />
+      </View>
     </View>
   );
 }
@@ -204,29 +231,39 @@ function NameScreen({ onRegistered }: { onRegistered: (u: User) => void }) {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>You're in</Text>
-      <Text style={styles.subtitle}>Pick a name your crew will recognize</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Display name"
-        placeholderTextColor="#55555f"
-        value={name}
-        onChangeText={setName}
-        autoCapitalize="words"
-        autoCorrect={false}
-        maxLength={40}
-        onSubmitEditing={submit}
-        returnKeyType="go"
-      />
-      <Pressable
-        style={[styles.button, (!name.trim() || busy) && styles.buttonDisabled]}
-        onPress={submit}
-        disabled={!name.trim() || busy}
-      >
-        {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Let's go</Text>}
-      </Pressable>
-      {error && <Text style={styles.error}>{error}</Text>}
-      <Text style={styles.meta}>API: {BASE_URL}</Text>
+      <Reveal>
+        <Text style={styles.eyebrow}>Welcome</Text>
+        <Text style={type.hero}>You're in.</Text>
+        <Text style={[type.subtitle, styles.lede]}>
+          Pick a name your crew will recognise in the dark.
+        </Text>
+      </Reveal>
+
+      <Reveal delay={90} style={styles.formBlock}>
+        <GlassSurface r={radius.md} sunken>
+          <TextInput
+            style={styles.input}
+            placeholder="Display name"
+            placeholderTextColor={color.textFaint}
+            value={name}
+            onChangeText={setName}
+            autoCapitalize="words"
+            autoCorrect={false}
+            maxLength={40}
+            onSubmitEditing={submit}
+            returnKeyType="go"
+          />
+        </GlassSurface>
+        <GlassButton
+          label="Let's go"
+          onPress={submit}
+          disabled={!name.trim() || busy}
+          busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+        />
+        {error && <Text style={styles.error}>{error}</Text>}
+      </Reveal>
+
+      <Text style={styles.meta}>{BASE_URL}</Text>
     </View>
   );
 }
@@ -234,8 +271,9 @@ function NameScreen({ onRegistered }: { onRegistered: (u: User) => void }) {
 function MissingKeyScreen() {
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>Auth not configured</Text>
-      <Text style={styles.subtitle}>
+      <Text style={styles.eyebrow}>Setup</Text>
+      <Text style={type.title}>Auth not configured</Text>
+      <Text style={type.subtitle}>
         Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY in frontend/.env to the publishable key from your
         Clerk dashboard (API Keys), then restart `npm start` so Expo picks it up.
       </Text>
@@ -246,7 +284,7 @@ function MissingKeyScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#101014",
+    backgroundColor: color.void,
   },
   screen: {
     flex: 1,
@@ -254,53 +292,52 @@ const styles = StyleSheet.create({
   hidden: {
     display: "none",
   },
+  tabBarLayer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
   card: {
     flex: 1,
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 460,
     alignSelf: "center",
     justifyContent: "center",
-    gap: 12,
-    padding: 24,
+    gap: space.lg,
+    padding: space.xl,
   },
-  title: {
-    fontSize: 34,
-    fontWeight: "800",
-    color: "#fff",
+  eyebrow: {
+    ...type.label,
+    marginBottom: space.sm,
+    color: color.accentSoft,
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#9a9aa5",
+  lede: {
+    marginTop: space.sm,
+  },
+  formBlock: {
+    gap: space.md,
   },
   input: {
-    backgroundColor: "#1c1c22",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    fontFamily: font.sansMedium,
+    color: color.text,
+    paddingHorizontal: space.lg,
+    paddingVertical: 15,
     fontSize: 17,
-  },
-  button: {
-    backgroundColor: "#5b5bf0",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "600",
   },
   error: {
-    color: "#ff6b6b",
+    fontFamily: font.sansMedium,
+    color: color.danger,
     fontSize: 14,
   },
   meta: {
-    color: "#55555f",
-    fontSize: 12,
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: space.xl,
+    fontFamily: font.mono,
+    color: "rgba(255,255,255,0.20)",
+    fontSize: 11,
     textAlign: "center",
   },
 });

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Image, ScrollView, Text, View } from "react-native";
 
 import {
   avatarUri,
@@ -9,6 +9,9 @@ import {
   type Group,
   type GroupDetail,
 } from "../api";
+import { useTabBarClearance } from "../TabBar";
+import { GlassButton, GlassSurface, Reveal } from "../ui/Glass";
+import { color, radius, space, type } from "../ui/theme";
 import { formatEventDates, type PastGroup } from "./events";
 import { styles } from "./styles";
 
@@ -21,32 +24,46 @@ export default function Chooser({
   onJoin: () => void;
   pastGroups: PastGroup[];
 }) {
+  const clearance = useTabBarClearance();
   return (
     <ScrollView
       style={styles.scroll}
       contentContainerStyle={[
         styles.chooserContent,
         pastGroups.length === 0 && styles.chooserContentCentered,
+        { paddingBottom: clearance + space.lg },
       ]}
+      showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.title}>Your crew</Text>
-      <Text style={styles.subtitle}>Start a group or join one with a code.</Text>
-      <Pressable style={styles.button} onPress={onCreate}>
-        <Ionicons name="add-circle-outline" size={20} color="#fff" />
-        <Text style={styles.buttonText}>Create a new group</Text>
-      </Pressable>
-      <Pressable style={[styles.button, styles.buttonSecondary]} onPress={onJoin}>
-        <Ionicons name="enter-outline" size={20} color="#fff" />
-        <Text style={styles.buttonText}>Join with a code</Text>
-      </Pressable>
+      <Reveal>
+        <Text style={styles.eyebrow}>Nobody yet</Text>
+        <Text style={type.hero}>Find your crew</Text>
+        <Text style={[styles.subtitle, { marginTop: space.sm }]}>
+          Start a group, or drop in with a four-letter code.
+        </Text>
+      </Reveal>
+
+      <Reveal delay={90} style={{ gap: space.md, marginTop: space.md }}>
+        <GlassButton
+          label="Create a new group"
+          onPress={onCreate}
+          icon={<Ionicons name="add-circle" size={19} color="#fff" />}
+        />
+        <GlassButton
+          label="Join with a code"
+          variant="glass"
+          onPress={onJoin}
+          icon={<Ionicons name="enter-outline" size={19} color={color.text} />}
+        />
+      </Reveal>
 
       {pastGroups.length > 0 && (
-        <>
+        <Reveal delay={170} style={{ marginTop: space.lg }}>
           <Text style={styles.sectionHeader}>My previous groups</Text>
           {pastGroups.map(({ group, event }) => (
             <PastGroupCard key={group.id} group={group} event={event} />
           ))}
-        </>
+        </Reveal>
       )}
     </ScrollView>
   );
@@ -73,35 +90,38 @@ function PastGroupCard({ group, event }: { group: Group; event: FestivalEvent })
 
   const dates = formatEventDates(event.starts_at, event.ends_at);
 
+  // History is over, so it sits back: a dimmer pane than anything live.
   return (
-    <View style={styles.pastCard}>
-      <Text style={styles.pastGroupName}>{group.name}</Text>
-      <View style={styles.pastEventRow}>
-        <Ionicons name="musical-notes" size={14} color="#8b8bf5" />
-        <Text style={styles.pastEventName}>{event.name}</Text>
-      </View>
-      {dates && <Text style={styles.pastDates}>{dates}</Text>}
-
-      {detail === null ? (
-        <ActivityIndicator color="#5b5bf0" style={styles.pastMembersLoading} />
-      ) : (
-        <View style={styles.pastMemberGrid}>
-          {detail.members.map((m) => (
-            <View key={m.user_id} style={styles.pastMember}>
-              {avatarUri(m.avatar_url) ? (
-                <Image source={avatarUri(m.avatar_url)!} style={styles.pastMemberAvatar} />
-              ) : (
-                <View style={[styles.pastMemberAvatar, styles.memberAvatarEmpty]}>
-                  <Ionicons name="person" size={16} color="#9a9aa5" />
-                </View>
-              )}
-              <Text style={styles.pastMemberName} numberOfLines={1}>
-                {m.display_name}
-              </Text>
-            </View>
-          ))}
+    <GlassSurface r={radius.lg} intensity={32} style={styles.pastCard}>
+      <View style={styles.pastBody}>
+        <Text style={styles.pastGroupName}>{group.name}</Text>
+        <View style={styles.pastEventRow}>
+          <Ionicons name="musical-notes" size={12} color={color.accentSoft} />
+          <Text style={styles.pastEventName}>{event.name}</Text>
         </View>
-      )}
-    </View>
+        {dates && <Text style={styles.pastDates}>{dates}</Text>}
+
+        {detail === null ? (
+          <ActivityIndicator color={color.accentSoft} style={styles.pastMembersLoading} />
+        ) : (
+          <View style={styles.pastMemberGrid}>
+            {detail.members.map((m) => (
+              <View key={m.user_id} style={styles.pastMember}>
+                {avatarUri(m.avatar_url) ? (
+                  <Image source={avatarUri(m.avatar_url)!} style={styles.pastMemberAvatar} />
+                ) : (
+                  <View style={[styles.pastMemberAvatar, styles.memberAvatarEmpty]}>
+                    <Ionicons name="person" size={16} color={color.textFaint} />
+                  </View>
+                )}
+                <Text style={styles.pastMemberName} numberOfLines={1}>
+                  {m.display_name}
+                </Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    </GlassSurface>
   );
 }

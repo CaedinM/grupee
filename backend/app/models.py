@@ -14,7 +14,6 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
-    Integer,
     String,
     TypeDecorator,
     UniqueConstraint,
@@ -73,30 +72,11 @@ class User(Base):
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, nullable=False)
 
-    location: Mapped["Location | None"] = relationship(
-        back_populates="user", uselist=False, cascade="all, delete-orphan"
-    )
+    # Live position lives in Redis, not here — see app/redis_client.py. There is
+    # deliberately no locations table or User.location relationship.
     memberships: Mapped[list["Membership"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
-
-
-class Location(Base):
-    """Latest position only — one row per user, upserted on every report."""
-
-    __tablename__ = "locations"
-
-    user_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
-    )
-    lat: Mapped[float] = mapped_column(Float, nullable=False)
-    lng: Mapped[float] = mapped_column(Float, nullable=False)
-    heading: Mapped[float | None] = mapped_column(Float, nullable=True)
-    battery: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    accuracy: Mapped[float | None] = mapped_column(Float, nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, nullable=False)
-
-    user: Mapped[User] = relationship(back_populates="location")
 
 
 class Event(Base):

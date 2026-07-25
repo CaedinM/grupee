@@ -9,6 +9,9 @@ import {
   View,
 } from "react-native";
 
+import { GlassButton, GlassSurface, Reveal } from "./ui/Glass";
+import { color, font, radius, space, type } from "./ui/theme";
+
 type Mode = "signIn" | "signUp" | "verify";
 
 /** Clerk errors carry a structured list; surface the human-readable one. */
@@ -88,44 +91,54 @@ export default function AuthScreen() {
   if (mode === "verify") {
     return (
       <View style={styles.card}>
-        <Text style={styles.title}>Check your email</Text>
-        <Text style={styles.subtitle}>
-          Enter the 6-digit code sent to {email.trim()}
-        </Text>
-        <TextInput
-          style={[styles.input, styles.codeInput]}
-          placeholder="000000"
-          placeholderTextColor="#55555f"
-          value={code}
-          onChangeText={setCode}
-          keyboardType="number-pad"
-          textContentType="oneTimeCode"
-          maxLength={6}
-          autoFocus
-          onSubmitEditing={submitCode}
-        />
-        <Pressable
-          style={[styles.button, (code.trim().length !== 6 || busy) && styles.buttonDisabled]}
-          onPress={submitCode}
-          disabled={code.trim().length !== 6 || busy}
-        >
-          {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify</Text>}
-        </Pressable>
-        {error && <Text style={styles.error}>{error}</Text>}
-        <Pressable onPress={resendCode} disabled={busy} hitSlop={8}>
-          <Text style={styles.link}>Resend code</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => {
-            setMode("signUp");
-            setCode("");
-            setError(null);
-          }}
-          disabled={busy}
-          hitSlop={8}
-        >
-          <Text style={styles.link}>Back</Text>
-        </Pressable>
+        <Reveal>
+          <Text style={styles.eyebrow}>Verify</Text>
+          <Text style={type.hero}>Check your email</Text>
+          <Text style={[type.subtitle, styles.lede]}>
+            Enter the 6-digit code sent to {email.trim()}
+          </Text>
+        </Reveal>
+
+        <Reveal delay={90} style={styles.block}>
+          <GlassSurface r={radius.lg} sunken>
+            <TextInput
+              style={[styles.input, styles.codeInput]}
+              placeholder="000000"
+              placeholderTextColor="rgba(255,255,255,0.13)"
+              value={code}
+              onChangeText={setCode}
+              keyboardType="number-pad"
+              textContentType="oneTimeCode"
+              maxLength={6}
+              autoFocus
+              onSubmitEditing={submitCode}
+            />
+          </GlassSurface>
+          <GlassButton
+            label="Verify"
+            onPress={submitCode}
+            disabled={code.trim().length !== 6 || busy}
+            busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+          />
+          {error && <Text style={styles.error}>{error}</Text>}
+        </Reveal>
+
+        <Reveal delay={160} style={styles.links}>
+          <Pressable onPress={resendCode} disabled={busy} hitSlop={8}>
+            <Text style={styles.link}>Resend code</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setMode("signUp");
+              setCode("");
+              setError(null);
+            }}
+            disabled={busy}
+            hitSlop={8}
+          >
+            <Text style={styles.link}>Back</Text>
+          </Pressable>
+        </Reveal>
       </View>
     );
   }
@@ -134,57 +147,68 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>WhereTheyAt</Text>
-      <Text style={styles.subtitle}>
-        {signingIn ? "Welcome back — sign in to find your crew" : "Create an account to get started"}
-      </Text>
-      <TextInput
-        style={styles.input}
-        placeholder="Email"
-        placeholderTextColor="#55555f"
-        value={email}
-        onChangeText={setEmail}
-        autoCapitalize="none"
-        autoCorrect={false}
-        keyboardType="email-address"
-        textContentType="emailAddress"
-        returnKeyType="next"
-      />
-      <TextInput
-        style={styles.input}
-        placeholder={signingIn ? "Password" : "Password (8+ characters)"}
-        placeholderTextColor="#55555f"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry
-        textContentType={signingIn ? "password" : "newPassword"}
-        onSubmitEditing={signingIn ? submitSignIn : submitSignUp}
-        returnKeyType="go"
-      />
-      <Pressable
-        style={[styles.button, (!credentialsReady || busy || !loaded) && styles.buttonDisabled]}
-        onPress={signingIn ? submitSignIn : submitSignUp}
-        disabled={!credentialsReady || busy || !loaded}
-      >
-        {busy ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.buttonText}>{signingIn ? "Sign in" : "Sign up"}</Text>
-        )}
-      </Pressable>
-      {error && <Text style={styles.error}>{error}</Text>}
-      <Pressable
-        onPress={() => {
-          setMode(signingIn ? "signUp" : "signIn");
-          setError(null);
-        }}
-        disabled={busy}
-        hitSlop={8}
-      >
-        <Text style={styles.link}>
-          {signingIn ? "New here? Create an account" : "Already have an account? Sign in"}
+      <Reveal>
+        <Text style={styles.eyebrow}>{signingIn ? "Welcome back" : "First time"}</Text>
+        {/* The wordmark is the one place the display face runs full width. */}
+        <Text style={styles.wordmark}>WhereTheyAt</Text>
+        <Text style={[type.subtitle, styles.lede]}>
+          {signingIn
+            ? "Sign in and find your crew in the crowd."
+            : "Make an account and never lose anyone again."}
         </Text>
-      </Pressable>
+      </Reveal>
+
+      <Reveal delay={90} style={styles.block}>
+        <GlassSurface r={radius.md} sunken>
+          <TextInput
+            style={styles.input}
+            placeholder="Email"
+            placeholderTextColor={color.textFaint}
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            returnKeyType="next"
+          />
+        </GlassSurface>
+        <GlassSurface r={radius.md} sunken>
+          <TextInput
+            style={styles.input}
+            placeholder={signingIn ? "Password" : "Password (8+ characters)"}
+            placeholderTextColor={color.textFaint}
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType={signingIn ? "password" : "newPassword"}
+            onSubmitEditing={signingIn ? submitSignIn : submitSignUp}
+            returnKeyType="go"
+          />
+        </GlassSurface>
+        <GlassButton
+          label={signingIn ? "Sign in" : "Sign up"}
+          onPress={signingIn ? submitSignIn : submitSignUp}
+          disabled={!credentialsReady || busy || !loaded}
+          busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+        />
+        {error && <Text style={styles.error}>{error}</Text>}
+      </Reveal>
+
+      <Reveal delay={160} style={styles.links}>
+        <Pressable
+          onPress={() => {
+            setMode(signingIn ? "signUp" : "signIn");
+            setError(null);
+          }}
+          disabled={busy}
+          hitSlop={8}
+        >
+          <Text style={styles.link}>
+            {signingIn ? "New here? Create an account" : "Already have an account? Sign in"}
+          </Text>
+        </Pressable>
+      </Reveal>
     </View>
   );
 }
@@ -193,57 +217,57 @@ const styles = StyleSheet.create({
   card: {
     flex: 1,
     width: "100%",
-    maxWidth: 420,
+    maxWidth: 460,
     alignSelf: "center",
     justifyContent: "center",
-    gap: 12,
-    padding: 24,
+    gap: space.xl,
+    padding: space.xl,
   },
-  title: {
-    fontSize: 34,
-    fontWeight: "800",
-    color: "#fff",
+  eyebrow: {
+    ...type.label,
+    color: color.accentSoft,
+    marginBottom: space.sm,
   },
-  subtitle: {
-    fontSize: 16,
-    color: "#9a9aa5",
+  wordmark: {
+    ...type.hero,
+    fontSize: 42,
+    lineHeight: 46,
+    letterSpacing: -2,
+  },
+  lede: {
+    marginTop: space.sm,
+  },
+  block: {
+    gap: space.md,
+  },
+  links: {
+    gap: space.xs,
   },
   input: {
-    backgroundColor: "#1c1c22",
-    color: "#fff",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    fontFamily: font.sansMedium,
+    color: color.text,
+    paddingHorizontal: space.lg,
+    paddingVertical: 15,
     fontSize: 17,
   },
   codeInput: {
+    fontFamily: font.monoBold,
     textAlign: "center",
-    fontSize: 28,
-    fontWeight: "800",
+    fontSize: 30,
+    paddingVertical: 18,
     letterSpacing: 10,
-  },
-  button: {
-    backgroundColor: "#5b5bf0",
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: "center",
-  },
-  buttonDisabled: {
-    opacity: 0.4,
-  },
-  buttonText: {
-    color: "#fff",
-    fontSize: 17,
-    fontWeight: "600",
+    paddingLeft: 10,
   },
   link: {
-    color: "#8b8bf5",
-    fontSize: 15,
+    fontFamily: font.sansMedium,
+    color: color.accentSoft,
+    fontSize: 14,
     textAlign: "center",
-    paddingVertical: 4,
+    paddingVertical: space.sm,
   },
   error: {
-    color: "#ff6b6b",
+    fontFamily: font.sansMedium,
+    color: color.danger,
     fontSize: 14,
     textAlign: "center",
   },
