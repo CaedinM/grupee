@@ -143,7 +143,7 @@ Cross-file invariants that matter when changing things:
   owns one socket to the active group, resolved once in `SignedInApp` and its `members` array
   passed down as a prop to every consumer (`MapScreen`, `MapScreen.web`, `GroupView`) — there is
   no more `useGroupLocations` and no 2s locations GET. `useLocationReporting` no longer PUTs on a
-  1.5s timer: it watches GPS with `distanceInterval: 10` (the OS delivers a fix only after ~10m of
+  1.5s timer: it watches GPS with `distanceInterval: 5` (the OS delivers a fix only after ~5m of
   movement) and pushes each fix up the socket via `socket.send`, plus a **180s heartbeat** that
   resends the last fix so a stationary user stays live. `send` is fire-and-forget (no server echo),
   so `lastAck`/`sentCount` are synthesized locally, and the socket patches the self entry in

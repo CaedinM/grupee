@@ -9,13 +9,17 @@ import {
 
 // Server → client frames. `snapshot` seeds every member on connect; `join`/
 // `leave` track roster changes mid-session; `update` carries one member's new
-// position. A member's own updates are never echoed back, so self stays fresh
-// via a local patch in `send` instead.
+// position. `join` and `update` both carry the full member card, so a peer that
+// missed a join still renders name/avatar. `conn` is the sender socket's
+// connection id: peers track the latest conn per user and ignore a `leave` whose
+// conn is stale, so a lingering old socket can't evict a reconnected member. A
+// member's own updates are never echoed back, so self stays fresh via a local
+// patch in `send` instead.
 type ServerMessage =
   | { type: "snapshot"; members: MemberLocation[] }
-  | { type: "join"; user_id: string; member: MemberLocation }
-  | { type: "update"; user_id: string; location: MemberLocation["location"] }
-  | { type: "leave"; user_id: string };
+  | { type: "join"; user_id: string; conn: string; member: MemberLocation }
+  | { type: "update"; user_id: string; conn: string; member: MemberLocation }
+  | { type: "leave"; user_id: string; conn: string };
 
 export interface LocationSocket {
   /** Push this device's position up the socket (no-op until connected). */
@@ -58,6 +62,10 @@ export function useLocationSocket(
   // The roster is kept in a ref (source of truth) and mirrored to state; the
   // ref lets `send` patch the self entry without depending on render timing.
   const membersRef = useRef<Map<string, MemberLocation>>(new Map());
+  // Latest connection id seen per user (from join/update). A `leave` is honored
+  // only if its conn matches (or the user's conn is unknown) — a stale leave
+  // from a since-replaced socket is ignored so a reconnected peer isn't dropped.
+  const connByUser = useRef<Map<string, string>>(new Map());
 
   const publish = useCallback(() => {
     setMembers([...membersRef.current.values()]);
@@ -92,6 +100,7 @@ export function useLocationSocket(
   useEffect(() => {
     if (!enabled || !groupId) {
       membersRef.current = new Map();
+      connByUser.current = new Map();
       setMembers([]);
       setConnected(false);
       setError(null);
@@ -113,35 +122,44 @@ export function useLocationSocket(
     const handle = (msg: ServerMessage) => {
       switch (msg.type) {
         case "snapshot":
+          // A fresh snapshot is the authoritative roster; conn ids from a prior
+          // connection no longer apply, so clear them and let joins/updates
+          // repopulate.
           membersRef.current = new Map(msg.members.map((m) => [m.user_id, m]));
+          connByUser.current = new Map();
           publish();
           break;
-        case "join":
-          if (!membersRef.current.has(msg.user_id)) {
-            membersRef.current.set(msg.user_id, msg.member);
-            publish();
-          }
-          break;
-        case "update": {
+        case "join": {
+          connByUser.current.set(msg.user_id, msg.conn);
+          // Refresh the card, but keep a live location we already have rather
+          // than regressing to the join's (possibly older) Redis position.
           const existing = membersRef.current.get(msg.user_id);
           membersRef.current.set(
             msg.user_id,
-            existing
-              ? { ...existing, location: msg.location }
-              : {
-                  user_id: msg.user_id,
-                  display_name: "",
-                  avatar_url: null,
-                  role: "member",
-                  location: msg.location,
-                }
+            existing?.location
+              ? { ...msg.member, location: existing.location }
+              : msg.member
           );
           publish();
           break;
         }
-        case "leave":
+        case "update":
+          // The update carries the full member card, so this always has identity
+          // — no blank-placeholder branch needed.
+          connByUser.current.set(msg.user_id, msg.conn);
+          membersRef.current.set(msg.user_id, msg.member);
+          publish();
+          break;
+        case "leave": {
+          // Ignore a leave from a socket that's already been replaced: if we've
+          // seen a newer conn for this user, they've reconnected and are still
+          // here. Honor it when the conn matches or is unknown.
+          const known = connByUser.current.get(msg.user_id);
+          if (known !== undefined && known !== msg.conn) break;
+          connByUser.current.delete(msg.user_id);
           if (membersRef.current.delete(msg.user_id)) publish();
           break;
+        }
       }
     };
 

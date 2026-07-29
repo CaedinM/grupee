@@ -17,6 +17,7 @@ every socket on the worker.
 import asyncio
 import contextlib
 import json
+import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
@@ -202,10 +203,16 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def _handle_message(group_id: str, user_id: str, raw: str) -> None:
+async def _handle_message(group_id: str, user_row: tuple, conn: str, raw: str) -> None:
     """A client frame. Only `loc` is meaningful; a heartbeat is the same message
     (re-stamps updated_at and refreshes the TTL). Writes to Redis, then publishes
-    the new position to the group's channel."""
+    the new position to the group's channel.
+
+    The update carries the mover's full member card (name/avatar/role), not just
+    coordinates, so a peer that missed this member's `join` can still render them
+    with identity instead of a blank placeholder. `conn` tags the message with
+    this socket's connection id so a stale `leave` can be told from a live one.
+    """
     try:
         data = json.loads(raw)
     except ValueError:
@@ -222,11 +229,18 @@ async def _handle_message(group_id: str, user_id: str, raw: str) -> None:
         )
     except ValidationError:
         return  # out-of-range/malformed fix — drop it, same as HTTP 422 would
+    user_id = user_row[0]
     payload = await redis_client.awrite_location(
         user_id, loc.lat, loc.lng, loc.heading, loc.battery, loc.accuracy
     )
     await redis_client.publish_group(
-        group_id, {"type": "update", "user_id": user_id, "location": payload}
+        group_id,
+        {
+            "type": "update",
+            "user_id": user_id,
+            "conn": conn,
+            "member": _member_dict(user_row, payload),
+        },
     )
 
 
@@ -266,25 +280,37 @@ async def group_socket(websocket: WebSocket, group_id: str):
     # frame is the snapshot, not a stray peer update.
     manager.register(group_id, websocket, user_id)
 
-    # Tell existing members a peer joined (their snapshot predates this socket),
-    # carrying the card so they get name/avatar without a DB hit; location fills
-    # in on this member's first `update`.
-    self_card = next(
-        (_member_dict(row, None) for row in roster if row[0] == user_id), None
-    )
-    if self_card is not None:
+    # A unique id for THIS connection, tagged onto join/update/leave. Peers track
+    # the latest conn per user and ignore a leave whose conn is stale, so a
+    # lingering old socket (e.g. after a wifi→cellular switch) can't evict a
+    # member who has already reconnected on a new socket.
+    conn_id = uuid.uuid4().hex
+
+    # Tell existing members a peer joined (their snapshot predates this socket).
+    # The join carries the member card AND their last-known position from Redis,
+    # so peers see the dot immediately instead of waiting for the next update
+    # (up to a heartbeat away if the joiner is standing still).
+    self_row = next((row for row in roster if row[0] == user_id), None)
+    if self_row is not None:
         await redis_client.publish_group(
-            group_id, {"type": "join", "user_id": user_id, "member": self_card}
+            group_id,
+            {
+                "type": "join",
+                "user_id": user_id,
+                "conn": conn_id,
+                "member": _member_dict(self_row, positions.get(user_id)),
+            },
         )
 
     try:
         while True:
             raw = await websocket.receive_text()
-            await _handle_message(group_id, user_id, raw)
+            if self_row is not None:
+                await _handle_message(group_id, self_row, conn_id, raw)
     except WebSocketDisconnect:
         pass
     finally:
         manager.unregister(group_id, websocket)
         await redis_client.publish_group(
-            group_id, {"type": "leave", "user_id": user_id}
+            group_id, {"type": "leave", "user_id": user_id, "conn": conn_id}
         )

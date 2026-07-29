@@ -4,11 +4,11 @@ import { Platform } from "react-native";
 
 import { type LocationReport, type LocationRow } from "./api";
 
-// Send only after ~10m of real movement (enforced by the OS via distanceInterval,
+// Send only after ~5m of real movement (enforced by the OS via distanceInterval,
 // which is far more battery-efficient than sampling every fix in JS), plus a
 // heartbeat every 3 minutes so a stationary user still proves liveness and keeps
 // their Redis TTL refreshed. The backend's LOCATION_TTL_SECONDS must exceed this.
-const MOVEMENT_DISTANCE_M = 10;
+const MOVEMENT_DISTANCE_M = 5;
 const HEARTBEAT_MS = 180_000;
 
 export type Permission = "asking" | "granted" | "denied";
@@ -27,7 +27,7 @@ export interface LocationReporting {
 /**
  * Requests foreground location permission and watches the device position so the
  * map can always show the user's own dot. While `enabled` (the group's event is
- * live), each fix — delivered by the OS only after ~10m of movement — is pushed
+ * live), each fix — delivered by the OS only after ~5m of movement — is pushed
  * up the location socket via `send`, plus a 3-minute heartbeat for standing
  * still. Outside a live-event group the position stays on-device.
  */
@@ -101,7 +101,7 @@ export function useLocationReporting(
         }
       }
 
-      // The OS delivers a fix only after ~10m of movement, so each callback is
+      // The OS delivers a fix only after ~5m of movement, so each callback is
       // already a "moved" event — send it straight up when enabled.
       sub = await Location.watchPositionAsync(
         { accuracy, distanceInterval: MOVEMENT_DISTANCE_M },
