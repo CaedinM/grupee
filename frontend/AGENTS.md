@@ -67,10 +67,12 @@ Cross-file invariants that matter when changing things:
   `GroupsScreen` via `onGroupChange`), `liveness`, and `reporting`. Screens receive them as
   props. Resolve shared state once here rather than re-polling it per screen.
 - **Event liveness is the single gate on tracking.** `useEventLiveness(activeGroup)` runs
-  once in `App.tsx` and its result is passed to both `MapScreen` and `GroupsScreen`.
-  Location only streams to the backend while the status is `"live"` — nobody gets tracked
-  between festivals. Groups with no `event_id`, or events with no schedule, count as live
-  so pre-admin-tool rows keep working.
+  once in `App.tsx` and its result is passed to both `MapScreen` and `GroupsScreen`. The
+  `live` flag gates both sides of the location socket — `useLocationSocket` only connects,
+  and `useLocationReporting` only sends, while the status is `"live"` — so nobody streams or
+  is streamed to between festivals. The backend independently rejects a socket for an ended
+  event (close 4409), so the gate is enforced on both ends now. Groups with no `event_id`, or
+  events with no schedule, count as live so pre-admin-tool rows keep working.
 - **A group's life ends with its event, and the split is mostly the client's job.** The
   backend enforces expiry on the two write paths only — creating a group against a finished
   event and joining one both 409, each mapped to fixed copy in `CreateForm` / `JoinForm`
@@ -137,8 +139,19 @@ Cross-file invariants that matter when changing things:
   dismissed instantly by the `MapView`'s `onPress`/`onPanDrag` (and on recenter / liveness or
   event change). The press handler reads live/sets from `stageDataRef` so it stays a stable
   callback. The web variant has no map, so there's nothing to mirror there.
-- **Poll intervals are deliberate and live next to their hook**: location PUT 1.5s and
-  group locations GET 2s (the backend's hot paths), group members 5s, event refetch 60s,
+- **Live location is a WebSocket, not a poll.** `useLocationSocket` (`src/useLocationSocket.ts`)
+  owns one socket to the active group, resolved once in `SignedInApp` and its `members` array
+  passed down as a prop to every consumer (`MapScreen`, `MapScreen.web`, `GroupView`) — there is
+  no more `useGroupLocations` and no 2s locations GET. `useLocationReporting` no longer PUTs on a
+  1.5s timer: it watches GPS with `distanceInterval: 10` (the OS delivers a fix only after ~10m of
+  movement) and pushes each fix up the socket via `socket.send`, plus a **180s heartbeat** that
+  resends the last fix so a stationary user stays live. `send` is fire-and-forget (no server echo),
+  so `lastAck`/`sentCount` are synthesized locally, and the socket patches the self entry in
+  `members` on each send. The socket reconnects with exponential backoff on transient drops but
+  stops on terminal close codes (4403 not-a-member, 4404 no-group, 4409 event-ended). The backend's
+  `PUT /users/{id}/location` and `GET /groups/{id}/locations` still exist as a fallback but the app
+  doesn't call them. Keep `LOCATION_TTL_SECONDS` (backend, 210s) > the 180s heartbeat.
+- **Poll intervals are deliberate and live next to their hook**: group members 5s, event refetch 60s,
   landmark refetch 60s and set refetch 60s (cold data — the interval is really the
   error-retry loop), liveness re-evaluation tick 30s. Polling loops guard with an `inFlight` flag and a
   `cancelled` flag in the cleanup; copy that shape rather than inventing a new one.

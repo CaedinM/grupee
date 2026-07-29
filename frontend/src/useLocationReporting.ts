@@ -2,9 +2,14 @@ import * as Location from "expo-location";
 import { useEffect, useRef, useState } from "react";
 import { Platform } from "react-native";
 
-import { putLocation, type LocationRow } from "./api";
+import { type LocationReport, type LocationRow } from "./api";
 
-const REPORT_INTERVAL_MS = 1500;
+// Send only after ~10m of real movement (enforced by the OS via distanceInterval,
+// which is far more battery-efficient than sampling every fix in JS), plus a
+// heartbeat every 3 minutes so a stationary user still proves liveness and keeps
+// their Redis TTL refreshed. The backend's LOCATION_TTL_SECONDS must exceed this.
+const MOVEMENT_DISTANCE_M = 10;
+const HEARTBEAT_MS = 180_000;
 
 export type Permission = "asking" | "granted" | "denied";
 
@@ -12,19 +17,25 @@ export interface LocationReporting {
   permission: Permission;
   /** Latest device fix (local, may not be persisted yet). */
   fix: Location.LocationObject | null;
-  /** Latest server-acknowledged location row (what's in the DB). */
+  /** Latest position we sent to the backend (synthesized locally — the socket
+   * is fire-and-forget, so there's no server echo to wait on). */
   lastAck: LocationRow | null;
   sentCount: number;
   error: string | null;
 }
 
 /**
- * Requests foreground location permission and watches the device position so
- * the map can always show the user's own dot. The latest fix is PUT to the
- * backend every 1.5s only while `enabled` — outside a live-event group the
- * position stays on-device, since nobody can see it anyway.
+ * Requests foreground location permission and watches the device position so the
+ * map can always show the user's own dot. While `enabled` (the group's event is
+ * live), each fix — delivered by the OS only after ~10m of movement — is pushed
+ * up the location socket via `send`, plus a 3-minute heartbeat for standing
+ * still. Outside a live-event group the position stays on-device.
  */
-export function useLocationReporting(userId: string, enabled: boolean): LocationReporting {
+export function useLocationReporting(
+  userId: string,
+  enabled: boolean,
+  send: (report: LocationReport) => void
+): LocationReporting {
   const [permission, setPermission] = useState<Permission>("asking");
   const [fix, setFix] = useState<Location.LocationObject | null>(null);
   const [lastAck, setLastAck] = useState<LocationRow | null>(null);
@@ -34,9 +45,27 @@ export function useLocationReporting(userId: string, enabled: boolean): Location
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
-    let timer: ReturnType<typeof setInterval> | null = null;
-    let inFlight = false;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+
+    // Normalize a fix into the report shape and push it up the socket. iOS
+    // reports heading/accuracy as -1 when unknown; the API wants null for those
+    // and rejects out-of-range values.
+    const report = (position: Location.LocationObject) => {
+      const { latitude, longitude, heading, accuracy } = position.coords;
+      const payload: LocationReport = {
+        lat: latitude,
+        lng: longitude,
+        heading: heading != null && heading >= 0 && heading <= 360 ? heading : null,
+        accuracy: accuracy != null && accuracy >= 0 ? accuracy : null,
+      };
+      send(payload);
+      if (!cancelled) {
+        setLastAck({ user_id: userId, updated_at: new Date().toISOString(), ...payload });
+        setSentCount((n) => n + 1);
+        setError(null);
+      }
+    };
 
     (async () => {
       const { granted } = await Location.requestForegroundPermissionsAsync();
@@ -52,12 +81,15 @@ export function useLocationReporting(userId: string, enabled: boolean): Location
       const accuracy =
         Platform.OS === "web" ? Location.Accuracy.Balanced : Location.Accuracy.BestForNavigation;
 
-      // Seed an initial fix so reporting starts even if the watch is slow to
-      // deliver, and surface the failure instead of waiting forever.
+      // Seed an initial fix so the dot appears (and the first position is sent)
+      // even if the watch is slow to deliver; surface failure instead of hanging.
       try {
         const position = await Location.getCurrentPositionAsync({ accuracy });
         latest.current = position;
-        if (!cancelled) setFix(position);
+        if (!cancelled) {
+          setFix(position);
+          if (enabled) report(position);
+        }
       } catch (e) {
         if (!cancelled) {
           setError(
@@ -69,55 +101,36 @@ export function useLocationReporting(userId: string, enabled: boolean): Location
         }
       }
 
-      // The watch keeps `latest` fresh; the timer PUTs it every 1.5s.
-      // (watchPositionAsync's timeInterval is Android-only, so our own timer
-      // keeps the report cadence consistent on iOS too.)
+      // The OS delivers a fix only after ~10m of movement, so each callback is
+      // already a "moved" event — send it straight up when enabled.
       sub = await Location.watchPositionAsync(
-        { accuracy, distanceInterval: 0 },
+        { accuracy, distanceInterval: MOVEMENT_DISTANCE_M },
         (position) => {
           latest.current = position;
-          if (!cancelled) setFix(position);
+          if (cancelled) return;
+          setFix(position);
+          if (enabled) report(position);
         },
         (reason) => {
           if (!cancelled) setError(`Location watch error: ${reason}`);
         }
       );
 
-      if (!enabled) return; // watch only — nothing reports until the event is live
-
-      timer = setInterval(async () => {
-        const position = latest.current;
-        if (!position || inFlight) return;
-        inFlight = true;
-        try {
-          // iOS reports heading/accuracy as -1 when unknown; the API wants
-          // null for unknown and rejects out-of-range values.
-          const { heading, accuracy: acc } = position.coords;
-          const ack = await putLocation(userId, {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-            heading: heading != null && heading >= 0 && heading <= 360 ? heading : null,
-            accuracy: acc != null && acc >= 0 ? acc : null,
-          });
-          if (!cancelled) {
-            setLastAck(ack);
-            setSentCount((n) => n + 1);
-            setError(null);
-          }
-        } catch (e) {
-          if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-        } finally {
-          inFlight = false;
-        }
-      }, REPORT_INTERVAL_MS);
+      // Heartbeat: resend the last fix if nothing has moved, so a stationary
+      // member stays live instead of expiring to no-location.
+      if (enabled) {
+        heartbeat = setInterval(() => {
+          if (latest.current && !cancelled) report(latest.current);
+        }, HEARTBEAT_MS);
+      }
     })();
 
     return () => {
       cancelled = true;
       sub?.remove();
-      if (timer) clearInterval(timer);
+      if (heartbeat) clearInterval(heartbeat);
     };
-  }, [userId, enabled]);
+  }, [userId, enabled, send]);
 
   return { permission, fix, lastAck, sentCount, error };
 }

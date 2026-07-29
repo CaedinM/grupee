@@ -1,6 +1,7 @@
 import json
 import logging
 import time
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from . import redis_client, ws
 from .logging_config import logger
 from .routers import events, groups, users
 from .storage import UPLOAD_DIR
@@ -17,7 +19,22 @@ from .storage import UPLOAD_DIR
 # pre-deploy command so it happens once per deploy rather than in every worker.
 # The app deliberately does no DDL at startup.
 
-app = FastAPI(title="WhereTheyAt", description="Festival friend-finder backend")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # The async Redis client (WebSocket path) opens lazily on first use; nothing
+    # to start here. On the way down, cancel the per-group subscriber tasks and
+    # close the async client's pool so a worker exits cleanly.
+    yield
+    await ws.manager.shutdown()
+    await redis_client.aclose()
+
+
+app = FastAPI(
+    title="WhereTheyAt",
+    description="Festival friend-finder backend",
+    lifespan=lifespan,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,6 +50,7 @@ app.mount("/static", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 app.include_router(users.router)
 app.include_router(groups.router)
 app.include_router(events.router)
+app.include_router(ws.router)
 
 MAX_LOGGED_BODY_CHARS = 2000
 SENSITIVE_KEYS = {"password", "token", "secret", "authorization"}

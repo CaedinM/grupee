@@ -71,20 +71,17 @@ def _jwks() -> jwt.PyJWKClient:
 _bearer = HTTPBearer(auto_error=False)
 
 
-def get_clerk_id(
-    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
-) -> str:
-    """Verify the bearer token and return the Clerk user id (`sub`).
+def verify_clerk_token(token: str) -> str:
+    """Verify a raw Clerk session JWT and return its `sub` (the Clerk user id).
 
-    Use this directly for read endpoints that only need "is signed in";
-    use get_current_user when the local users row is needed.
+    The transport-agnostic core of auth: `get_clerk_id` wraps it for HTTP
+    (pulling the token from the Authorization header), and the WebSocket path
+    calls it directly with the token from the query string, since a socket
+    upgrade can't carry an `Authorization` header through React Native. Raises
+    HTTPException on any failure so both callers get a consistent status code.
     """
-    if creds is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token"
-        )
     if AUTH_DEV_MODE:
-        return creds.credentials
+        return token
     if CLERK_ISSUER is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -92,9 +89,9 @@ def get_clerk_id(
             "(set CLERK_PUBLISHABLE_KEY, or AUTH_DEV_MODE=1 for local dev)",
         )
     try:
-        signing_key = _jwks().get_signing_key_from_jwt(creds.credentials)
+        signing_key = _jwks().get_signing_key_from_jwt(token)
         payload = jwt.decode(
-            creds.credentials,
+            token,
             signing_key.key,
             algorithms=["RS256"],
             issuer=CLERK_ISSUER,
@@ -107,6 +104,21 @@ def get_clerk_id(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {e}"
         )
     return payload["sub"]
+
+
+def get_clerk_id(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> str:
+    """Verify the bearer token and return the Clerk user id (`sub`).
+
+    Use this directly for read endpoints that only need "is signed in";
+    use get_current_user when the local users row is needed.
+    """
+    if creds is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token"
+        )
+    return verify_clerk_token(creds.credentials)
 
 
 def get_current_user(

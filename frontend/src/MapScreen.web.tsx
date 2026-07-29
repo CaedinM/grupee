@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
-import type { Group, User } from "./api";
+import type { Group, MemberLocation, User } from "./api";
 import { landmarksContaining } from "./geo";
 import { useTabBarClearance } from "./TabBar";
 import { GlassSurface, Reveal } from "./ui/Glass";
@@ -12,7 +12,6 @@ import { color, font, glass, radius, space, type as typeScale } from "./ui/theme
 import { useEventLandmarks } from "./useEventLandmarks";
 import { currentSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
-import { useGroupLocations } from "./useGroupLocations";
 import type { LocationReporting } from "./useLocationReporting";
 
 function formatStartsAt(iso: string): string {
@@ -30,18 +29,21 @@ export default function MapScreen({
   reporting,
   group,
   liveness,
+  members,
+  membersError,
   onOpenGroups,
 }: {
   user: User;
   reporting: LocationReporting;
   group: Group | null;
   liveness: EventLiveness;
+  /** Live member positions from the shared location socket (empty off-event). */
+  members: MemberLocation[];
+  membersError: string | null;
   onOpenGroups: () => void;
 }) {
   const { permission, lastAck, sentCount, error } = reporting;
   const live = liveness.status === "live";
-  // No polling outside a live event — matches the reporting side in App.tsx.
-  const { members, error: groupError } = useGroupLocations(live ? (group?.id ?? null) : null);
   // Same gating as the native map: only the active group's event landmarks.
   const landmarks = useEventLandmarks(group?.event_id ?? null);
   // The native map shows these as a pill under the group/event header; here
@@ -161,7 +163,7 @@ export default function MapScreen({
         </StatBlock>
       )}
 
-      {(error ?? groupError) && <Text style={styles.error}>{error ?? groupError}</Text>}
+      {(error ?? membersError) && <Text style={styles.error}>{error ?? membersError}</Text>}
     </ScrollView>
   );
 }

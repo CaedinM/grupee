@@ -12,6 +12,23 @@ function resolveBaseUrl(): string {
 
 export const BASE_URL = resolveBaseUrl();
 
+// The WebSocket origin is the same host as the REST API. `^http` → `ws` also
+// turns `https` into `wss`, so a TLS API implies a TLS socket.
+export const WS_BASE_URL = BASE_URL.replace(/^http/, "ws");
+
+/** URL for a group's live-location socket. The Clerk JWT rides in the query
+ * string because a React Native socket upgrade can't carry an Authorization
+ * header; the server verifies it once at connect. */
+export function groupSocketUrl(groupId: string, token: string): string {
+  return `${WS_BASE_URL}/ws/groups/${groupId}?token=${encodeURIComponent(token)}`;
+}
+
+/** The current Clerk session JWT, for callers (the socket) that can't go through
+ * `request()`'s header injection. Null until signed in. */
+export async function getAuthToken(): Promise<string | null> {
+  return getToken ? await getToken() : null;
+}
+
 // Clerk owns the session, but this module isn't a React component and can't
 // call hooks — so the app registers useAuth().getToken here once signed in.
 // Clerk caches the ~60s session JWT internally and refreshes it just before

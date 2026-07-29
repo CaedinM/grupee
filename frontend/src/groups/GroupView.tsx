@@ -10,6 +10,7 @@ import {
   type FestivalEvent,
   type Group,
   type GroupDetail,
+  type MemberLocation,
   type User,
 } from "../api";
 import { landmarksContaining } from "../geo";
@@ -17,8 +18,6 @@ import { useTabBarClearance } from "../TabBar";
 import { GlassSurface, Reveal } from "../ui/Glass";
 import { color, radius, space, type } from "../ui/theme";
 import { useEventLandmarks } from "../useEventLandmarks";
-import type { EventLiveness } from "../useEventLiveness";
-import { useGroupLocations } from "../useGroupLocations";
 import CodeBadge from "./CodeBadge";
 import { styles } from "./styles";
 
@@ -27,12 +26,13 @@ const MEMBERS_POLL_MS = 5000;
 export default function GroupView({
   user,
   group,
-  liveness,
+  memberLocations,
   onLeft,
 }: {
   user: User;
   group: Group;
-  liveness: EventLiveness;
+  /** Live member positions from the shared location socket (empty off-event). */
+  memberLocations: MemberLocation[];
   onLeft: () => void;
 }) {
   const [detail, setDetail] = useState<GroupDetail | null>(null);
@@ -77,12 +77,9 @@ export default function GroupView({
     };
   }, [group.id]);
 
-  // Member positions + the event's landmarks let us tag each member with the
-  // landmark they're standing in. Locations only stream while the event is
-  // live, matching the map; nobody's tagged between festivals. Landmarks are
-  // already scoped to this group's event.
-  const live = liveness.status === "live";
-  const { members: memberLocations } = useGroupLocations(live ? group.id : null);
+  // Member positions (from the shared location socket, empty off-event) + the
+  // event's landmarks let us tag each member with the landmark they're standing
+  // in. Landmarks are already scoped to this group's event.
   const landmarks = useEventLandmarks(group.event_id ?? null);
 
   const landmarkByUser = new Map<string, string>();

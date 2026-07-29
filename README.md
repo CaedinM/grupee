@@ -1,34 +1,35 @@
-# WhereTheyAt?
+# Grupee
 
-A festival friend-finder. Your crew joins a group tied to a festival, and while that
-festival is live everyone's position shows up on a shared map.
+Music festival comapnion app. Track your friends, view set-times and track your activity throughout the day all in one place.
 
-- **Groups** are crews — create one against a festival, share the 4-letter join code.
+- **Groups** create a group, select a festival, share the 4-letter join code.
 - **Events** are the festivals: schedule, boundary polygon, landmark pins.
 - **A group's life is its event's life.** Location streams only while the event is live;
   finished groups stay readable as history.
 
-Positions are polled, not pushed: GPS PUT every ~1.5s, group locations GET every ~2s.
+Positions are published to backend via FastAPI Websockets.
 Only the latest position per user is stored — no history. Live positions live in **Redis**
 (TTL'd, latest-only), never in the SQL database; everything else is Postgres.
 
-## Monorepo structure
+## Repo structure
 
 ```
-backend/     FastAPI — Postgres (local + Railway; SQLite fallback), + Redis for live positions
+backend/     FastAPI — Postgres (local + Railway) + Redis for live positions
 frontend/    Expo / React Native app - the user client
 admin/       Vite + React Ops console
 ```
 
 Three standalone packages, no workspace tooling; they meet at the HTTP contract.
 
-## Tech stack
+## The Stack
 
-- **Backend:** FastAPI, SQLAlchemy 2.0, Alembic; Postgres (local + Railway), Redis for live positions
-- **Frontend:** Expo SDK 54 / React Native 0.81
-- **Admin App:** Vite 8, React 19
+- **Backend:** FastAPI, SQLAlchemy 2.0
+- **Frontend:** Expo / React Native
+- **Admin Console:** Vite, React
+- **DB:** Postgres, Redis
 - **Auth:** Clerk
 - **DevTools:** Claude Code (Fable 5 + Opus 4.8), Cursor
+- **Cloud Services:** Railway, Cloudflare R2 (Object Storage)
 
 
 # Setup (first time, after cloning)

@@ -6,6 +6,7 @@ import {
   listEvents,
   type FestivalEvent,
   type Group,
+  type MemberLocation,
   type User,
   type UserGroup,
 } from "../api";
@@ -30,11 +31,14 @@ type Mode =
 export default function GroupsScreen({
   user,
   liveness,
+  memberLocations,
   onGroupChange,
 }: {
   user: User;
   /** Liveness of the active group's event, resolved one level up in App. */
   liveness: EventLiveness;
+  /** Live member positions from the shared location socket (empty off-event). */
+  memberLocations: MemberLocation[];
   onGroupChange: (group: Group | null) => void;
 }) {
   const [mode, setMode] = useState<Mode>({ name: "loading" });
@@ -127,7 +131,12 @@ export default function GroupsScreen({
       );
     case "group":
       return (
-        <GroupView user={user} group={mode.group} liveness={liveness} onLeft={toChooser} />
+        <GroupView
+          user={user}
+          group={mode.group}
+          memberLocations={memberLocations}
+          onLeft={toChooser}
+        />
       );
   }
 }

@@ -16,6 +16,7 @@ import os
 from datetime import datetime, timezone
 
 import redis
+import redis.asyncio as aredis
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,12 +25,18 @@ load_dotenv()
 # the private one from the API service so traffic stays on the internal network.
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
-# A position not refreshed within this window expires. Reports arrive ~every
-# 1.5s, so 90s tolerates ~60 consecutive misses (network gaps, backgrounding)
-# before a member drops to location=null. Tunable without a code change.
-LOCATION_TTL_SECONDS = int(os.getenv("LOCATION_TTL_SECONDS", "90"))
+# A position not refreshed within this window expires. With the WebSocket
+# transport a stationary client only sends a heartbeat every 180s, so the TTL
+# MUST comfortably exceed that or a standing-still user would blink to
+# location=null between beats. 210s leaves a full missed-heartbeat of slack.
+# (Invariant: keep LOCATION_TTL_SECONDS > the client heartbeat interval.)
+LOCATION_TTL_SECONDS = int(os.getenv("LOCATION_TTL_SECONDS", "210"))
 
 _KEY_PREFIX = "loc:"
+# Per-group pub/sub channel for the WebSocket fan-out backplane. A position that
+# lands on one uvicorn worker is PUBLISHed here so every other worker can push it
+# to its locally-connected sockets in that group.
+_CHANNEL_PREFIX = "groupchan:"
 
 # decode_responses so reads come back as str, not bytes. health_check_interval
 # reconnects transparently after Railway drops an idle connection (the Redis
@@ -43,9 +50,52 @@ client = redis.from_url(
     retry_on_timeout=True,
 )
 
+# Async client for the WebSocket path (the HTTP endpoints keep using the sync
+# `client` above). Same connection options; created lazily so importing this
+# module doesn't open a socket, and closed on app shutdown via aclose().
+_async_client: aredis.Redis | None = None
+
+
+def async_client() -> aredis.Redis:
+    global _async_client
+    if _async_client is None:
+        _async_client = aredis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_keepalive=True,
+            health_check_interval=30,
+            retry_on_timeout=True,
+        )
+    return _async_client
+
+
+async def aclose() -> None:
+    """Close the async client's pool on shutdown. No-op if never opened."""
+    global _async_client
+    if _async_client is not None:
+        await _async_client.aclose()
+        _async_client = None
+
 
 def _key(user_id: str) -> str:
     return f"{_KEY_PREFIX}{user_id}"
+
+
+def channel(group_id: str) -> str:
+    return f"{_CHANNEL_PREFIX}{group_id}"
+
+
+def _build_payload(lat: float, lng: float, heading: float | None,
+                   battery: int | None, accuracy: float | None) -> dict:
+    return {
+        "lat": lat,
+        "lng": lng,
+        "heading": heading,
+        "battery": battery,
+        "accuracy": accuracy,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 def write_location(user_id: str, lat: float, lng: float, heading: float | None,
@@ -53,15 +103,7 @@ def write_location(user_id: str, lat: float, lng: float, heading: float | None,
     """Upsert a user's latest position with the staleness TTL. Returns the
     stored payload (including the server-stamped updated_at) so the caller can
     echo it back in the same shape the DB row used to return."""
-    updated_at = datetime.now(timezone.utc)
-    payload = {
-        "lat": lat,
-        "lng": lng,
-        "heading": heading,
-        "battery": battery,
-        "accuracy": accuracy,
-        "updated_at": updated_at.isoformat(),
-    }
+    payload = _build_payload(lat, lng, heading, battery, accuracy)
     client.set(_key(user_id), json.dumps(payload), ex=LOCATION_TTL_SECONDS)
     return payload
 
@@ -84,3 +126,31 @@ def delete_location(user_id: str) -> None:
     """Drop a user's live position immediately (e.g. on account deletion).
     A no-op if there is nothing stored."""
     client.delete(_key(user_id))
+
+
+# ---------- Async path (WebSocket transport) ----------
+
+async def awrite_location(user_id: str, lat: float, lng: float, heading: float | None,
+                          battery: int | None, accuracy: float | None) -> dict:
+    """Async twin of write_location — same key, TTL, and returned payload shape."""
+    payload = _build_payload(lat, lng, heading, battery, accuracy)
+    await async_client().set(_key(user_id), json.dumps(payload), ex=LOCATION_TTL_SECONDS)
+    return payload
+
+
+async def aread_locations(user_ids: list[str]) -> dict[str, dict]:
+    """Async twin of read_locations, used to build a socket's connect snapshot."""
+    if not user_ids:
+        return {}
+    raw_values = await async_client().mget([_key(uid) for uid in user_ids])
+    out: dict[str, dict] = {}
+    for user_id, raw in zip(user_ids, raw_values):
+        if raw is not None:
+            out[user_id] = json.loads(raw)
+    return out
+
+
+async def publish_group(group_id: str, message: dict) -> None:
+    """Fan a message out to the group's channel; every worker subscribed to it
+    (i.e. every worker holding a socket for this group) receives it."""
+    await async_client().publish(channel(group_id), json.dumps(message))

@@ -32,6 +32,7 @@ import { Aurora, GlassButton, GlassSurface, Reveal } from "./src/ui/Glass";
 import { color, font, radius, space, type } from "./src/ui/theme";
 import { useEventLiveness } from "./src/useEventLiveness";
 import { useLocationReporting } from "./src/useLocationReporting";
+import { useLocationSocket } from "./src/useLocationSocket";
 
 const PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -167,17 +168,28 @@ function SignedInApp({
   // group's locations to poll and display.
   const [activeGroup, setActiveGroup] = useState<Group | null>(null);
   const liveness = useEventLiveness(activeGroup);
-  // Reporting lives here, not in a screen, so location keeps streaming to the
-  // backend no matter which tab is open — but only while the user's group has
-  // a live event; nobody gets tracked between festivals.
-  const reporting = useLocationReporting(user.id, liveness.status === "live");
+  // One WebSocket to the active group, resolved once here so the map, the groups
+  // tab, and the reporting side all share it. `send` streams this device's
+  // position up; `members` is every peer's live position pushed down. Both are
+  // gated on a live event — nobody streams or is streamed to between festivals.
+  const live = liveness.status === "live";
+  const socket = useLocationSocket(user.id, live ? (activeGroup?.id ?? null) : null, live);
+  // Reporting lives here, not in a screen, so location keeps streaming no matter
+  // which tab is open. It owns GPS acquisition (10m movement filter + heartbeat)
+  // and pushes each fix up the socket.
+  const reporting = useLocationReporting(user.id, live, socket.send);
 
   // All screens stay mounted (hidden, not unmounted) so the map keeps its
   // camera position across tab switches.
   return (
     <View style={styles.screen}>
       <View style={[styles.screen, tab !== "groups" && styles.hidden]}>
-        <GroupsScreen user={user} liveness={liveness} onGroupChange={setActiveGroup} />
+        <GroupsScreen
+          user={user}
+          liveness={liveness}
+          memberLocations={socket.members}
+          onGroupChange={setActiveGroup}
+        />
       </View>
       <View style={[styles.screen, tab !== "event" && styles.hidden]}>
         <MyEventScreen liveness={liveness} />
@@ -188,6 +200,8 @@ function SignedInApp({
           reporting={reporting}
           group={activeGroup}
           liveness={liveness}
+          members={socket.members}
+          membersError={socket.error}
           onOpenGroups={() => setTab("groups")}
         />
       </View>

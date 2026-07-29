@@ -10,6 +10,7 @@ import {
   type EventSet,
   type Group,
   type Landmark,
+  type MemberLocation,
   type User,
 } from "./api";
 import { landmarksContaining } from "./geo";
@@ -19,7 +20,6 @@ import { color, font, glass, radius, space, type as typeScale } from "./ui/theme
 import { useEventLandmarks } from "./useEventLandmarks";
 import { currentSetForLandmark, upcomingSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
-import { useGroupLocations } from "./useGroupLocations";
 import type { LocationReporting } from "./useLocationReporting";
 
 // Ionicon per landmark kind. Falls back to a generic pin for the "other" kind
@@ -110,18 +110,21 @@ export default function MapScreen({
   reporting,
   group,
   liveness,
+  members,
+  membersError,
   onOpenGroups,
 }: {
   user: User;
   reporting: LocationReporting;
   group: Group | null;
   liveness: EventLiveness;
+  /** Live member positions from the shared location socket (empty off-event). */
+  members: MemberLocation[];
+  membersError: string | null;
   onOpenGroups: () => void;
 }) {
   const { permission, fix, lastAck, error } = reporting;
   const live = liveness.status === "live";
-  // No polling outside a live event — matches the reporting side in App.tsx.
-  const { members, error: groupError } = useGroupLocations(live ? (group?.id ?? null) : null);
   const mapRef = useRef<MapView>(null);
   const insets = useSafeAreaInsets();
   // The tab bar floats over the map, so the bottom-anchored controls position
@@ -217,7 +220,7 @@ export default function MapScreen({
     );
   }
 
-  const displayedError = error ?? groupError;
+  const displayedError = error ?? membersError;
 
   // Landmarks whose geofence currently contains the user. Landmarks are already
   // scoped to the active group's event, so this answers "which landmark am I in
