@@ -1,0 +1,74 @@
+# WhereTheyAt — local dev shortcuts.
+#
+# One discoverable entrypoint tying the three packages together. Run `make` (or
+# `make help`) to list targets. Recipes call the backend venv binaries directly
+# (backend/.venv/bin/*) so no `source` is needed.
+#
+# Assumes the documented local setup: Homebrew Postgres + Redis running, a
+# backend/.venv with deps installed, and backend/.env holding CLERK_PUBLISHABLE_KEY
+# + a local DATABASE_URL. See README.md for first-time setup.
+
+DB_NAME ?= wheretheyat_dev
+UVICORN  = .venv/bin/uvicorn
+ALEMBIC  = .venv/bin/alembic
+PSQL     = psql -d $(DB_NAME)
+
+.DEFAULT_GOAL := help
+
+.PHONY: help backend backend-dev admin mobile migrate reset reset-user grant-admin users smoke verify
+
+help: ## List the available commands
+	@echo "WhereTheyAt local dev — make <target>"
+	@echo
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
+	@echo
+	@echo "  reset-user / grant-admin need CLERK_ID=user_xxx (see 'make users')."
+
+## --- run the apps ---------------------------------------------------------
+
+backend: ## Run the backend locally (real Clerk auth), reachable over Wi-Fi
+	cd backend && $(UVICORN) app.main:app --reload --host 0.0.0.0
+
+backend-dev: ## Run the backend with AUTH_DEV_MODE=1 (for `make smoke`)
+	cd backend && AUTH_DEV_MODE=1 $(UVICORN) app.main:app --reload
+
+admin: ## Run the admin console against the local backend (http://localhost:5173)
+	cd admin && npm run dev
+
+mobile: ## Run the Expo app against the local backend (LAN auto-detect)
+	cd frontend && npm start
+
+## --- database & first-login ----------------------------------------------
+
+migrate: ## Apply Alembic migrations to the local database
+	cd backend && $(ALEMBIC) upgrade head
+
+reset: ## Wipe the DB (+ live positions) and re-migrate — true first-time login
+	dropdb --force --if-exists $(DB_NAME)
+	createdb $(DB_NAME)
+	cd backend && $(ALEMBIC) upgrade head
+	-redis-cli flushdb
+	@echo "Reset done. Log in on a client to re-provision, then: make grant-admin CLERK_ID=..."
+
+reset-user: ## Delete one user by CLERK_ID (keeps events) so next login re-provisions
+	@test -n "$(CLERK_ID)" || { echo "usage: make reset-user CLERK_ID=user_xxx"; exit 1; }
+	$(PSQL) -c "UPDATE events SET creator_id = NULL WHERE creator_id = (SELECT id FROM users WHERE clerk_id = '$(CLERK_ID)');"
+	$(PSQL) -c "UPDATE groups SET creator_id = NULL WHERE creator_id = (SELECT id FROM users WHERE clerk_id = '$(CLERK_ID)');"
+	$(PSQL) -c "DELETE FROM users WHERE clerk_id = '$(CLERK_ID)';"
+
+grant-admin: ## Grant admin to a user by CLERK_ID (the only way past the admin gate)
+	@test -n "$(CLERK_ID)" || { echo "usage: make grant-admin CLERK_ID=user_xxx"; exit 1; }
+	$(PSQL) -c "UPDATE users SET is_admin = true WHERE clerk_id = '$(CLERK_ID)';"
+
+users: ## List users (find your clerk_id here)
+	$(PSQL) -c "SELECT id, clerk_id, display_name, is_admin FROM users ORDER BY created_at;"
+
+## --- checks ---------------------------------------------------------------
+
+smoke: ## Run the backend e2e smoke test (needs `make backend-dev` running elsewhere)
+	cd backend && ./smoke_test.sh
+
+verify: ## Static preflight before pushing to staging (both client typechecks)
+	cd admin && npx tsc -b
+	cd frontend && npx tsc --noEmit

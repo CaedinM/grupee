@@ -372,4 +372,51 @@ export const styles = StyleSheet.create({
     color: color.danger,
     fontSize: 14,
   },
+
+  /* ------------------------------------------------- leave confirmation */
+
+  // Dims the whole screen behind the dialog so the confirmation reads as a
+  // modal step rather than an inline panel.
+  confirmOverlay: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: space.xl,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  confirmCard: {
+    width: "100%",
+    maxWidth: 400,
+  },
+  confirmBody: {
+    padding: space.xl,
+    gap: space.md,
+  },
+  confirmTitle: {
+    fontFamily: font.displayBold,
+    color: color.text,
+    fontSize: 20,
+    letterSpacing: -0.4,
+  },
+  confirmMessage: {
+    fontFamily: font.sansMedium,
+    color: color.textDim,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  // The code is the one thing the user needs to rejoin, so it gets the mono
+  // treatment the rest of the flow uses for join codes.
+  confirmCode: {
+    fontFamily: font.monoBold,
+    color: color.text,
+    letterSpacing: 1,
+  },
+  confirmActions: {
+    flexDirection: "row",
+    gap: space.sm,
+    marginTop: space.sm,
+  },
+  confirmButton: {
+    flex: 1,
+  },
 });

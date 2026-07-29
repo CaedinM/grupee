@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, { Marker, Polygon } from "react-native-maps";
@@ -14,6 +15,13 @@ import {
   type User,
 } from "./api";
 import { landmarksContaining } from "./geo";
+import {
+  LandmarkGlyph,
+  PIN_COLORS,
+  PIN_TIERS,
+  pinColorFor,
+  type PinTier,
+} from "./map/landmarkPins";
 import { useTabBarClearance } from "./TabBar";
 import { GlassButton, GlassSurface, PulseDot, Reveal, usePressScale } from "./ui/Glass";
 import { color, font, glass, radius, space, type as typeScale } from "./ui/theme";
@@ -21,68 +29,6 @@ import { useEventLandmarks } from "./useEventLandmarks";
 import { currentSetForLandmark, upcomingSetForLandmark, useEventSets } from "./useEventSets";
 import type { EventLiveness } from "./useEventLiveness";
 import type { LocationReporting } from "./useLocationReporting";
-
-// Ionicon per landmark kind. Falls back to a generic pin for the "other" kind
-// and anything the server adds before this map does.
-const LANDMARK_ICONS: Record<Landmark["kind"], keyof typeof Ionicons.glyphMap> = {
-  stage: "musical-notes",
-  entrance: "log-in",
-  exit: "log-out",
-  restroom: "male-female",
-  food: "restaurant",
-  drinks: "beer",
-  medical: "medkit",
-  meetup: "flag",
-  other: "location",
-};
-
-/**
- * A point guaranteed inside the boundary polygon ([lat, lng] points), for
- * anchoring the label. A centroid can fall outside concave or
- * self-intersecting shapes — hand-drawn geofences are often both — so
- * instead: cast a horizontal line across the middle of the bounding box and
- * take the midpoint of the widest span that's inside the polygon.
- */
-function boundaryLabelPoint(points: [number, number][]): { latitude: number; longitude: number } {
-  let minLat = Infinity;
-  let maxLat = -Infinity;
-  for (const [lat] of points) {
-    if (lat < minLat) minLat = lat;
-    if (lat > maxLat) maxLat = lat;
-  }
-  const lat = (minLat + maxLat) / 2;
-
-  // Longitudes where polygon edges cross the scanline. The half-open test
-  // counts edges consistently when the line passes through a vertex.
-  const crossings: number[] = [];
-  for (let i = 0; i < points.length; i++) {
-    const [lat1, lng1] = points[i];
-    const [lat2, lng2] = points[(i + 1) % points.length];
-    if ((lat1 <= lat) !== (lat2 <= lat)) {
-      crossings.push(lng1 + ((lat - lat1) / (lat2 - lat1)) * (lng2 - lng1));
-    }
-  }
-  crossings.sort((a, b) => a - b);
-
-  // Even-odd rule: [0]–[1], [2]–[3], … are the inside spans.
-  let best: number | null = null;
-  let bestWidth = -1;
-  for (let i = 0; i + 1 < crossings.length; i += 2) {
-    const width = crossings[i + 1] - crossings[i];
-    if (width > bestWidth) {
-      bestWidth = width;
-      best = (crossings[i] + crossings[i + 1]) / 2;
-    }
-  }
-  if (best === null) {
-    // Degenerate (all points collinear): the vertex mean is as good as any.
-    return {
-      latitude: points.reduce((sum, [la]) => sum + la, 0) / points.length,
-      longitude: points.reduce((sum, [, ln]) => sum + ln, 0) / points.length,
-    };
-  }
-  return { latitude: lat, longitude: best };
-}
 
 function formatStartsAt(iso: string): string {
   return new Date(iso).toLocaleString([], {
@@ -104,6 +50,17 @@ const CAMERA_TILT = { pitch: 55, heading: 0, altitude: 700, zoom: 17 };
 // over the Aurora — `mutedStandard` is a pale map. Without a scrim under the
 // wash, light text on a blur of it has no contrast.
 const MAP_SCRIM = 0.46;
+
+// Horizontal space kept clear on the right of the header row. Apple Maps draws
+// its compass in that corner as soon as the map is rotated, and it's a real
+// control — the pills bound themselves rather than covering it. Reserving space
+// (instead of `mapPadding`) keeps the map's own centring untouched, so
+// `recenter`'s animateCamera still lands the user in the middle of the screen.
+const COMPASS_CLEARANCE = 64;
+
+// Same idea at the bottom: the recenter button is 46px inset 20px from the
+// right, so the where-you-are pill stops short of it instead of sliding under.
+const RECENTER_CLEARANCE = 78;
 
 export default function MapScreen({
   user,
@@ -255,19 +212,15 @@ export default function MapScreen({
           />
         )}
 
-        {boundary && liveness.event && (
-          <Marker
-            coordinate={boundaryLabelPoint(boundary)}
-            anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges={false}
-            zIndex={-1}
-          >
-            <Text style={styles.eventLabelText}>{liveness.event.name}</Text>
-          </Marker>
-        )}
-
         {landmarks.map((l) => (
-          <LandmarkMarker key={l.id} landmark={l} onPress={onSelectStage} />
+          <LandmarkMarker
+            key={l.id}
+            landmark={l}
+            // Only stages can be "playing", and only during a live event. The
+            // flag flips at set boundaries, so the marker re-renders rarely.
+            playing={live && l.kind === "stage" && currentSetForLandmark(sets, l.id, now) !== null}
+            onPress={onSelectStage}
+          />
         ))}
 
         {others.map((m) => (
@@ -297,47 +250,12 @@ export default function MapScreen({
       )}
 
       {/* Nothing to show without a group — the centre overlay is what prompts
-          joining one. */}
+          joining one. Event above group, each in its own pill: sharing one pill
+          meant two long names competed for the same width and both truncated. */}
       {group && (
         <View style={[styles.headerStack, { top: insets.top + 12 }]} pointerEvents="box-none">
-          <GroupPill group={group} eventName={liveness.event?.name ?? null} onPress={onOpenGroups} />
-
-          {/* One pill per landmark geofence the user is standing in. When the
-              event is live and it's a stage, the set currently on shows next to
-              the stage name. */}
-          {insideLandmarks.map((l) => {
-            const playing =
-              live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
-            return (
-              <GlassSurface
-                key={l.id}
-                r={radius.pill}
-                intensity={60}
-                scrim={MAP_SCRIM}
-                style={styles.pillShell}
-              >
-                <View style={styles.landmarkPill}>
-                  <Ionicons
-                    name={LANDMARK_ICONS[l.kind] ?? "location"}
-                    size={13}
-                    color={color.teal}
-                  />
-                  <Text style={styles.landmarkPillText} numberOfLines={1}>
-                    {l.name}
-                  </Text>
-                  {playing && (
-                    <>
-                      <View style={styles.headerDivider} />
-                      <PulseDot />
-                      <Text style={styles.landmarkPillArtist} numberOfLines={1}>
-                        {playing.artist}
-                      </Text>
-                    </>
-                  )}
-                </View>
-              </GlassSurface>
-            );
-          })}
+          {liveness.event && <EventPill name={liveness.event.name} />}
+          <GroupPill group={group} onPress={onOpenGroups} />
         </View>
       )}
 
@@ -396,6 +314,49 @@ export default function MapScreen({
         </View>
       )}
 
+      {/* Where you're standing — one pill per landmark geofence containing you.
+          When the event is live and it's a stage, the set currently on shows
+          beside the stage name. Anchored bottom-left: it's about your position,
+          so it sits near you rather than up with the event's identity. */}
+      {insideLandmarks.length > 0 && (
+        <View
+          style={[styles.locationStack, { bottom: clearance + space.lg }]}
+          pointerEvents="box-none"
+        >
+          {insideLandmarks.map((l) => {
+            const playing =
+              live && l.kind === "stage" ? currentSetForLandmark(sets, l.id, now) : null;
+            return (
+              <GlassSurface
+                key={l.id}
+                r={radius.pill}
+                intensity={60}
+                scrim={MAP_SCRIM}
+                style={styles.pillShell}
+              >
+                <View style={styles.landmarkPill}>
+                  {/* Same glyph source as the pin on the map, so the pill and
+                      the thing you're standing in agree. */}
+                  <LandmarkGlyph kind={l.kind} size={14} color={color.teal} />
+                  <Text style={styles.landmarkPillText} numberOfLines={1}>
+                    {l.name}
+                  </Text>
+                  {playing && (
+                    <>
+                      <View style={styles.headerDivider} />
+                      <PulseDot />
+                      <Text style={styles.landmarkPillArtist} numberOfLines={1}>
+                        {playing.artist}
+                      </Text>
+                    </>
+                  )}
+                </View>
+              </GlassSurface>
+            );
+          })}
+        </View>
+      )}
+
       {displayedError && (
         <View style={[styles.errorBanner, { bottom: clearance + 68 }]} pointerEvents="box-none">
           <GlassSurface r={radius.md} intensity={60} scrim={0.5} style={styles.errorShell}>
@@ -412,35 +373,36 @@ export default function MapScreen({
   );
 }
 
-/** The group / event pill. Tapping it jumps to the groups tab. */
-function GroupPill({
-  group,
-  eventName,
-  onPress,
-}: {
-  group: Group;
-  eventName: string | null;
-  onPress: () => void;
-}) {
+/**
+ * The festival you're at. Informational only — the event's own tab is one tap
+ * away in the tab bar, so this doesn't need to be a second route to it.
+ * Violet marks it as the event; the group pill below is white.
+ */
+function EventPill({ name }: { name: string }) {
+  return (
+    <GlassSurface r={radius.pill} intensity={60} scrim={MAP_SCRIM} style={styles.pillShell}>
+      <View style={styles.headerPill}>
+        <Ionicons name="musical-notes" size={13} color={color.accentSoft} />
+        <Text style={styles.headerEvent} numberOfLines={1}>
+          {name}
+        </Text>
+      </View>
+    </GlassSurface>
+  );
+}
+
+/** The crew you're with. Tapping it jumps to the groups tab. */
+function GroupPill({ group, onPress }: { group: Group; onPress: () => void }) {
   const { scale, onPressIn, onPressOut } = usePressScale(0.96);
   return (
     <Animated.View style={[{ transform: [{ scale }] }, styles.pillShell]}>
       <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
         <GlassSurface r={radius.pill} intensity={60} scrim={MAP_SCRIM}>
           <View style={styles.headerPill}>
-            <Ionicons name="people" size={14} color={color.accentSoft} />
+            <Ionicons name="people" size={14} color={color.text} />
             <Text style={styles.headerGroup} numberOfLines={1}>
               {group.name}
             </Text>
-            {eventName && (
-              <>
-                <View style={styles.headerDivider} />
-                <Ionicons name="musical-notes" size={13} color={color.accentSoft} />
-                <Text style={styles.headerEvent} numberOfLines={1}>
-                  {eventName}
-                </Text>
-              </>
-            )}
           </View>
         </GlassSurface>
       </Pressable>
@@ -528,39 +490,182 @@ function stageCalloutFor(sets: EventSet[], landmarkId: string, now: number): Sta
   return { heading: "No sets scheduled", artist: null };
 }
 
-// A small labelled pin for an event landmark. Content is all synchronous
-// (icon font + text), so no tracksViewChanges dance like AvatarMarker needs
-// for its remote images. zIndex sits below member avatars. Tapping it calls
-// `onPress`; the parent decides whether that stage opens a bubble.
+/* ------------------------------------------------------------ landmark pins */
+
+// Geometry per tier. These drive both the layout and the marker anchor, so the
+// anchor can be derived rather than guessed — see anchorFor below.
+const PIN_SIZE: Record<PinTier, number> = { primary: 44, secondary: 32, tertiary: 22 };
+const GLYPH_SIZE: Record<PinTier, number> = { primary: 21, secondary: 16, tertiary: 12 };
+// The primary pin's tail, which puts a point on the exact coordinate.
+const TAIL_H = 7;
+// The label block is a fixed height because the label is always single-line
+// (see landmarkLabel / numberOfLines={1}) — that is what makes the anchor
+// arithmetic below exact.
+const LABEL_H = 14 + 2; // lineHeight + marginTop
+
+/**
+ * Where on the marker's own box the coordinate sits.
+ *
+ * The whole point: a marker view is `badge + (tail) + (label)` stacked, and
+ * `anchor` is a fraction of that box — so a naive {0.5, 0.5} centres the *label*
+ * into the pin and floats the badge above the real spot. Instead:
+ *   primary   — the tail's tip is the spot
+ *   secondary — the circle's centre is the spot
+ *   tertiary  — no label, so the dot is the whole box
+ *
+ * This is only exact while the label stays one line. If it ever wraps, every
+ * pin silently drifts off its coordinate.
+ */
+function anchorFor(tier: PinTier): { x: number; y: number } {
+  if (tier === "tertiary") return { x: 0.5, y: 0.5 };
+  const pin = PIN_SIZE[tier] + (tier === "primary" ? TAIL_H : 0);
+  const total = pin + LABEL_H;
+  return { x: 0.5, y: (tier === "primary" ? pin : PIN_SIZE[tier] / 2) / total };
+}
+
+/**
+ * A labelled pin for an event landmark, drawn at one of three prominence tiers
+ * (see PIN_TIERS) so a headline stage doesn't look like a portaloo. zIndex sits
+ * below member avatars. Tapping it calls `onPress`; the parent decides whether
+ * that stage opens a bubble.
+ *
+ * Unlike the old Ionicon version, the glyph is a native `SymbolView` on iOS,
+ * which may not have laid out when the marker first captures — hence the same
+ * tracksViewChanges warm-up `AvatarMarker` uses for its remote images. It must
+ * end up false: left true, a screen of pins tanks the framerate on Android.
+ */
 function LandmarkMarker({
   landmark,
+  playing,
   onPress,
 }: {
   landmark: Landmark;
+  /** This stage has a set on right now — only ever true for `kind === "stage"`. */
+  playing: boolean;
   onPress: (landmark: Landmark) => void;
 }) {
-  const icon = LANDMARK_ICONS[landmark.kind] ?? "location";
-  // Medical stands out in red; everything else shares the teal landmark accent,
-  // distinct from members (orange) and self (indigo).
-  const color = landmark.kind === "medical" ? "#ef4444" : "#14b8a6";
+  const [tracksChanges, setTracksChanges] = useState(true);
+  useEffect(() => {
+    const t = setTimeout(() => setTracksChanges(false), 200);
+    return () => clearTimeout(t);
+  }, []);
+
+  const tier = PIN_TIERS[landmark.kind] ?? "secondary";
+  const size = PIN_SIZE[tier];
+  const tint = pinColorFor(landmark.kind);
+  const ringColor = playing ? PIN_COLORS.live : PIN_COLORS.ring;
+
+  // A squircle for the hero pin, a circle for the rest.
+  const r = tier === "primary" ? 15 : size / 2;
+  // Shadow and clipping have to live on different views — iOS clips a view's
+  // own shadow when `overflow: hidden` is set. The outer carries a solid fill
+  // so the shadow has a clean path to trace; the gradient covers it.
+  const badge = (
+    <View
+      style={[
+        { borderRadius: r, backgroundColor: tier === "primary" ? PIN_COLORS.stage : tint },
+        tier !== "tertiary" && styles.pinShadow,
+      ]}
+    >
+      <View
+        style={[
+          styles.pinBadge,
+          {
+            width: size,
+            height: size,
+            borderRadius: r,
+            borderColor: ringColor,
+            borderWidth: tier === "tertiary" ? 1.5 : 2.5,
+          },
+        ]}
+      >
+        {tier === "primary" && (
+          <LinearGradient
+            colors={playing ? ([PIN_COLORS.live, "#8B5CF6"] as const) : PIN_COLORS.stageGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            // The badge's `overflow: hidden` clips this to the squircle.
+            style={StyleSheet.absoluteFill}
+          />
+        )}
+        <LandmarkGlyph kind={landmark.kind} size={GLYPH_SIZE[tier]} color="#fff" />
+      </View>
+    </View>
+  );
 
   return (
     <Marker
       coordinate={{ latitude: landmark.lat, longitude: landmark.lng }}
-      anchor={{ x: 0.5, y: 0.5 }}
-      tracksViewChanges={false}
-      zIndex={0}
+      anchor={anchorFor(tier)}
+      tracksViewChanges={tracksChanges}
+      zIndex={tier === "primary" ? 1 : 0}
       onPress={() => onPress(landmark)}
     >
       <View style={styles.landmarkWrap}>
-        <View style={[styles.landmarkBadge, { backgroundColor: color }]}>
-          <Ionicons name={icon} size={15} color="#fff" />
+        <View>
+          {/* The halo sits behind the badge, so it grows out from under it. */}
+          {playing && <LiveHalo size={size} />}
+          {badge}
         </View>
-        <Text style={styles.landmarkLabel} numberOfLines={1}>
-          {landmark.name}
-        </Text>
+        {tier === "primary" && <View style={[styles.pinTail, { borderTopColor: ringColor }]} />}
+        {tier !== "tertiary" && (
+          <Text
+            style={[styles.landmarkLabel, tier === "primary" && styles.landmarkLabelPrimary]}
+            numberOfLines={1}
+          >
+            {landmark.name}
+          </Text>
+        )}
       </View>
     </Marker>
+  );
+}
+
+/**
+ * The breathing ring behind a stage that's currently playing — the same shape
+ * as the app's PulseDot, reimplemented here so the marker keeps the map palette
+ * rather than importing Nightglass tokens.
+ *
+ * iOS only. Android rasterises marker views, so an animation there would need
+ * tracksViewChanges pinned true — which costs far more frames than the halo is
+ * worth. Android keeps the static magenta ring the badge already has.
+ */
+function LiveHalo({ size }: { size: number }) {
+  const t = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(t, {
+          toValue: 1,
+          duration: 1800,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(t, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [t]);
+
+  if (Platform.OS !== "ios") return null;
+
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={[
+        styles.liveHalo,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          opacity: t.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+          transform: [{ scale: t.interpolate({ inputRange: [0, 1], outputRange: [1, 2.1] }) }],
+        },
+      ]}
+    />
   );
 }
 
@@ -737,41 +842,59 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  // Bare map-style label — a light halo keeps it readable over the muted map.
-  // Long names wrap (never truncate); the cap just stops one huge line.
-  eventLabelText: {
-    maxWidth: 220,
-    textAlign: "center",
-    color: "#5b5bf0",
-    fontSize: 13,
-    fontWeight: "700",
-    letterSpacing: 0.4,
-    textShadowColor: "rgba(255, 255, 255, 0.9)",
-    textShadowRadius: 3,
-  },
   landmarkWrap: {
     alignItems: "center",
   },
-  landmarkBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: "rgba(255, 255, 255, 0.9)",
+  // Size, radius, border and fill are all set inline per tier; this holds only
+  // what every tier shares. `overflow: hidden` clips the primary's gradient to
+  // the squircle.
+  pinBadge: {
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  pinShadow: {
+    shadowColor: "#0f2027",
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
+  },
+  // A CSS triangle: the point of the primary pin, landing on the coordinate.
+  pinTail: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: TAIL_H,
+    borderLeftColor: "transparent",
+    borderRightColor: "transparent",
+    marginTop: -1,
+  },
+  liveHalo: {
+    position: "absolute",
+    backgroundColor: PIN_COLORS.live,
   },
   // Matches the event label's bare map-style treatment — a light halo keeps it
-  // legible over the muted map.
+  // legible over the muted map. Single-line by contract: `anchorFor` derives the
+  // marker anchor from a fixed label height (LABEL_H), so a wrapping label would
+  // push every pin off its coordinate.
   landmarkLabel: {
     maxWidth: 120,
     textAlign: "center",
     color: "#0f766e",
     fontSize: 11,
+    lineHeight: 14,
     fontWeight: "700",
     marginTop: 2,
-    textShadowColor: "rgba(255, 255, 255, 0.9)",
+    textShadowColor: PIN_COLORS.halo,
     textShadowRadius: 3,
+  },
+  landmarkLabelPrimary: {
+    maxWidth: 140,
+    color: "#4338ca",
+    fontSize: 12.5,
+    letterSpacing: -0.2,
   },
   // Tooltip-style callout (no default OS bubble), drawn as glass like the rest
   // of the map chrome. Width-bounded so long artist names wrap instead of
@@ -820,12 +943,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
+  // Hugs the left edge; `right` bounds the row short of the compass rather than
+  // letting a long event or group name run under it. Each pill gets this full
+  // width to itself, which is the point of having split them.
   headerStack: {
     position: "absolute",
-    alignSelf: "center",
-    alignItems: "center",
+    left: space.lg,
+    right: COMPASS_CLEARANCE,
+    alignItems: "flex-start",
     gap: space.sm,
-    maxWidth: "92%",
+  },
+  // The where-you-are pill, bottom-left. `bottom` is set inline from the tab
+  // bar clearance; `right` keeps it off the recenter button it shares a
+  // baseline with.
+  locationStack: {
+    position: "absolute",
+    left: space.lg,
+    right: RECENTER_CLEARANCE,
+    alignItems: "flex-start",
+    gap: space.sm,
   },
   // Caps the pill's width on the wrapper, so the glass clips to the same shape
   // its content settles at.
@@ -865,6 +1001,8 @@ const styles = StyleSheet.create({
     height: 15,
     backgroundColor: glass.strokeBright,
   },
+  // The two header pills are peers now, so they share a size and differ only in
+  // colour: violet is the festival, white is your crew.
   headerGroup: {
     fontFamily: font.sansSemi,
     color: color.text,
@@ -873,9 +1011,10 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   headerEvent: {
-    fontFamily: font.sansMedium,
+    fontFamily: font.sansSemi,
     color: color.accentSoft,
-    fontSize: 13,
+    fontSize: 13.5,
+    letterSpacing: -0.2,
     flexShrink: 1,
   },
   // `bottom` for this and the recenter button is set inline from

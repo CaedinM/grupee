@@ -110,12 +110,48 @@ Cross-file invariants that matter when changing things:
   `listLandmarks(event_id)`) render only when the user is in a group and only for that
   group's own event — a groupless user or a group with no `event_id` sees neither. Both are
   shown regardless of liveness status (upcoming/live/ended) because they're wayfinding, not
-  live position. Landmark pins are keyed by kind through `LANDMARK_ICONS` in `MapScreen.tsx`;
-  the web variant lists them as telemetry rows. Keep both variants in step.
+  live position. Landmark pins are keyed by kind through `src/map/landmarkPins.tsx`; the web
+  variant lists them as telemetry rows (no per-kind glyph). Keep both variants in step.
+  The boundary draws as a bare `Polygon` — **the event's name is deliberately not painted
+  inside it.** It used to be, anchored by a scanline helper that found a point guaranteed to
+  sit inside a concave geofence; it was cut as clutter, because the header pill already names
+  the event permanently. Don't reintroduce an in-map event label.
+- **Landmark pins are tiered, and the tier drives the marker anchor.** `PIN_TIERS`
+  (`src/map/landmarkPins.tsx`) sorts each kind into `primary` (stage — 44px gradient squircle
+  with a tail), `secondary` (food/drinks/medical/meetup/entrance/exit — 32px solid circle), or
+  `tertiary` (restroom/other — 22px dot, **no label at all**, which is what keeps the map
+  readable). Because a marker's `anchor` is a fraction of its whole `badge + tail + label` box,
+  `anchorFor` in `MapScreen.tsx` derives it per tier so the primary's tail tip and the
+  secondary's circle centre land on the true coordinate. **That arithmetic is only exact while
+  the label is one line** — `landmarkLabel` fixes `lineHeight` and every call passes
+  `numberOfLines={1}`; let it wrap and every pin silently drifts off its coordinate.
+- **Glyphs are SF Symbols with an Ionicons fallback.** `LandmarkGlyph` wraps `expo-symbols`'
+  `SymbolView`, whose own `fallback` prop covers Android and web — callers never branch on
+  `Platform.OS`. `LANDMARK_SYMBOLS` is typed `SFSymbol`, a strict union, so a bad name is a
+  compile error rather than a pin that renders empty on device; keep names at SF Symbols 4.0
+  or lower to stay under the iOS 16.4 deployment target. `SymbolView` is a *native* view, so
+  unlike the old icon-font glyph the marker needs the `tracksViewChanges` warm-up
+  `AvatarMarker` uses (start true, flip false on a timer). **It must end up false** — left
+  true, a screen of pins tanks the framerate on Android.
+- **The currently-playing stage is marked on the map.** `MapScreen` passes `playing` down from
+  the `currentSetForLandmark` it already computes for the header pill; the pin answers with a
+  magenta ring and a hotter gradient, plus a breathing `LiveHalo` **on iOS only**. Android
+  rasterises marker views, so an animation there would mean pinning `tracksViewChanges` true —
+  it gets the static ring instead.
+- **The map's chrome sits in two corner stacks, and both reserve room for a native
+  control.** Top-left (`headerStack`) is identity: an `EventPill` above a `GroupPill`, one
+  name each. They were a single two-part pill once — splitting them is what stops a long
+  festival name and a long crew name from truncating each other, so keep one name per pill.
+  Bottom-left (`locationStack`) is position: the where-you-are landmark pills. Both hug the
+  left with `left` **and** `right` set, because bounding the row is what forces a long name to
+  truncate instead of growing into the corner control — `COMPASS_CLEARANCE` for Apple's
+  compass (top-right, appears once the map is rotated) and `RECENTER_CLEARANCE` for the
+  recenter button it shares a baseline with. Deliberately *not* `mapPadding`, which would also
+  shift the map's centring and leave `recenter`'s `animateCamera` off-centre.
 - **A landmark can carry its own geofence** (`Landmark.boundary`, a [lat, lng] polygon).
-  When the user's position falls inside one, its name shows in a teal pill stacked under the
-  group/event header pill (`headerStack` in `MapScreen.tsx`); the web variant surfaces the
-  same as a "You're at:" telemetry line. `GroupView` reuses the same test to tag each
+  When the user's position falls inside one, its name shows in a teal pill in the bottom-left
+  `locationStack` (`MapScreen.tsx`); the web variant surfaces the same as a "You're at:"
+  telemetry line. `GroupView` reuses the same test to tag each
   member row with the landmark they're standing in (right-aligned, teal), joining
   `useGroupLocations` positions against `useEventLandmarks`. The containment test is shared:
   `pointInPolygon` / `landmarksContaining` in `src/geo.ts`, used by both map variants and the
@@ -189,13 +225,16 @@ Cross-file invariants that matter when changing things:
   an opaque `backgroundColor` punches a hole in the design.
 - **The map is split into chrome and map, and only the chrome is themed.** Everything
   rendered *inside* `MapView` — the `AvatarMarker`s and their labels, `LandmarkMarker`'s
-  badge and label, the boundary `Polygon` and its event label, `LANDMARK_ICONS` — keeps its
-  own map-cartography palette (teal `#14b8a6` landmarks, orange members, indigo self, white
-  text haloes) and is deliberately *not* on Nightglass tokens: those marks have to read
-  against Apple's pale `mutedStandard` tiles, not against the Aurora. Everything overlaid on
-  top of the map — the group/event and landmark pills, the upcoming/ended message cards, the
-  error banner, the recenter button, the `StageBubble`, and the pre-GPS-fix waiting screen —
-  is Nightglass glass. Keep that line when editing this screen.
+  badge and label, the boundary `Polygon`, and everything in
+  `src/map/landmarkPins.tsx` — keeps its own map-cartography palette (`PIN_COLORS`: teal
+  `#14b8a6` landmarks, red medical, magenta live, plus orange members and indigo self) and is
+  deliberately *not* on Nightglass tokens: those marks have to read against Apple's pale
+  `mutedStandard` tiles, not against the Aurora. `landmarkPins.tsx` must not import
+  `src/ui/theme`. Everything overlaid on top of the map — the group/event and landmark pills,
+  the upcoming/ended message cards, the error banner, the recenter button, the `StageBubble`,
+  and the pre-GPS-fix waiting screen — is Nightglass glass. Keep that line when editing this
+  screen. The one deliberate crossover is `LandmarkGlyph`, used by both the pin and the
+  header pill so a kind looks the same in both.
 - **Glass over the map needs `scrim`.** `GlassSurface`'s `scrim` prop lays a black wash under
   the white one, because a blur of a pale map has no contrast for light text. Map chrome
   passes `MAP_SCRIM`; nothing over the Aurora needs it.

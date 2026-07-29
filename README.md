@@ -99,6 +99,47 @@ All three are **gitignored**. The Clerk publishable key is identical in all of t
 
 # Running the app
 
+## Local development with `make`
+
+A root `Makefile` wraps the everyday local-dev commands into one entrypoint. **Run every
+`make` target from the repo root** — each recipe `cd`s into the right package itself, so
+you never have to. `make` (or `make help`) prints the list any time.
+
+Prerequisites are the one-time setup above: Homebrew Postgres + Redis running, a
+`backend/.venv` with deps installed, and `node_modules` in `admin/` and `frontend/`.
+
+**Run the apps** — the everyday loop is three terminals, one per app:
+
+| Command | What it does |
+|---|---|
+| `make backend` | FastAPI with `--reload`, bound to `0.0.0.0` so your phone can reach it over Wi-Fi. **Real Clerk auth** — this is what the clients actually talk to. |
+| `make admin` | Admin console at `http://localhost:5173`, pointed at `localhost:8000`. |
+| `make mobile` | Expo dev server; the phone app auto-detects your Mac's LAN IP (scan the QR in Expo Go, or press `i` for the simulator). |
+
+**Database & first-time login** (see the runbook below for how these fit together):
+
+| Command | What it does |
+|---|---|
+| `make reset` | Drop + recreate the DB, re-run migrations, and flush Redis — a full clean slate. |
+| `make reset-user CLERK_ID=user_xxx` | Delete just one user (keeps their events) so their next login re-provisions. |
+| `make grant-admin CLERK_ID=user_xxx` | Set `is_admin=true` — the only way past the admin-console gate. |
+| `make users` | List users (this is where you find your `clerk_id`). |
+| `make migrate` | `alembic upgrade head` — apply pending migrations without wiping data. |
+
+**Checks:**
+
+| Command | What it does |
+|---|---|
+| `make backend-dev` | Run the backend with `AUTH_DEV_MODE=1` (keyless) — needed only so `make smoke` can create throwaway users. |
+| `make smoke` | Run the backend e2e smoke test (needs `make backend-dev` running in another terminal). |
+| `make verify` | Typecheck both clients (`admin` + `frontend`) — a static preflight before pushing to staging. |
+
+> `make` deliberately covers **local** only. Staging / production are chosen with the
+> `npm run …:staging` / `…:prod` client scripts below, so an accidental `make` never points
+> at a deployed backend.
+
+Everything below is the same thing spelled out manually.
+
 The clients bake in **one backend URL per run**, chosen by which command you use:
 
 | | Local backend | Staging | Production |
@@ -135,12 +176,27 @@ cd admin && npm run dev           # http://localhost:5173 → talks to localhost
 ```
 
 Auth is real Clerk in local dev (the app sends real tokens, the backend verifies them).
-Reset local data anytime:
+Reset local data anytime (`make reset` wraps both lines):
 
 ```bash
 dropdb wheretheyat_dev && createdb wheretheyat_dev && alembic upgrade head   # SQL
 redis-cli flushall                                                           # live positions
 ```
+
+### Retry the first-time-login flow
+
+The "first login" is just a Clerk account with **no `users` row yet** — so emptying the DB
+turns any existing login back into a first-timer.
+
+1. `make reset` — empties the DB (+ live positions).
+2. Open a client and sign in with your usual Clerk account. With no profile row, `GET
+   /users/me` 404s and the app drops you on the name/registration screen → `POST /users`
+   provisions a fresh row (201).
+3. Need the admin console? `make users` to read your `clerk_id`, then
+   `make grant-admin CLERK_ID=user_xxx`.
+
+Faster variant that keeps your seeded events: `make reset-user CLERK_ID=user_xxx`, then
+reopen the client to re-register.
 
 Backend test suite (walks the full acceptance flow) — needs a dev-auth server:
 

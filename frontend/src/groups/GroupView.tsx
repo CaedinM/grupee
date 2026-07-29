@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Image, Pressable, ScrollView, Text, View } from "react-native";
+import { ActivityIndicator, Image, Modal, Pressable, ScrollView, Text, View } from "react-native";
 
 import {
   avatarUri,
@@ -15,7 +15,7 @@ import {
 } from "../api";
 import { landmarksContaining } from "../geo";
 import { useTabBarClearance } from "../TabBar";
-import { GlassSurface, Reveal } from "../ui/Glass";
+import { GlassButton, GlassSurface, Reveal } from "../ui/Glass";
 import { color, radius, space, type } from "../ui/theme";
 import { useEventLandmarks } from "../useEventLandmarks";
 import CodeBadge from "./CodeBadge";
@@ -38,6 +38,8 @@ export default function GroupView({
   const [detail, setDetail] = useState<GroupDetail | null>(null);
   const [event, setEvent] = useState<FestivalEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingLeave, setConfirmingLeave] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const clearance = useTabBarClearance();
 
   // Groups made since event selection landed always have one; older test
@@ -99,11 +101,14 @@ export default function GroupView({
   const creator = detail?.members.find((m) => m.role === "admin") ?? null;
 
   const leave = async () => {
+    setLeaving(true);
     try {
       await leaveGroup(group.id, user.id);
       onLeft();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setConfirmingLeave(false);
+      setLeaving(false);
     }
   };
 
@@ -185,9 +190,54 @@ export default function GroupView({
 
       {error && <Text style={styles.error}>{error}</Text>}
 
-      <Pressable style={styles.leaveButton} onPress={leave} hitSlop={8}>
+      <Pressable
+        style={styles.leaveButton}
+        onPress={() => setConfirmingLeave(true)}
+        hitSlop={8}
+      >
         <Text style={styles.leaveText}>Leave group</Text>
       </Pressable>
+
+      <Modal
+        visible={confirmingLeave}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !leaving && setConfirmingLeave(false)}
+      >
+        <Pressable
+          style={styles.confirmOverlay}
+          onPress={() => !leaving && setConfirmingLeave(false)}
+        >
+          {/* Swallow taps on the card so the backdrop press doesn't dismiss it. */}
+          <Pressable onPress={() => {}} style={styles.confirmCard}>
+            <GlassSurface r={radius.lg} raised>
+              <View style={styles.confirmBody}>
+                <Text style={styles.confirmTitle}>Leave {group.name}?</Text>
+                <Text style={styles.confirmMessage}>
+                  You can join again with the code{" "}
+                  <Text style={styles.confirmCode}>{group.code}</Text>.
+                </Text>
+                <View style={styles.confirmActions}>
+                  <GlassButton
+                    label="Cancel"
+                    variant="glass"
+                    disabled={leaving}
+                    onPress={() => setConfirmingLeave(false)}
+                    style={styles.confirmButton}
+                  />
+                  <GlassButton
+                    label="Leave"
+                    disabled={leaving}
+                    busy={leaving ? <ActivityIndicator color={color.text} /> : undefined}
+                    onPress={leave}
+                    style={styles.confirmButton}
+                  />
+                </View>
+              </View>
+            </GlassSurface>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }

@@ -31,6 +31,7 @@ alembic upgrade head
 uvicorn app.main:app --reload
 
 # reset local state (Postgres): dropdb wheretheyat_dev && createdb wheretheyat_dev && alembic upgrade head
+#   (or, from the repo root: `make reset` — also flushes Redis; `make grant-admin CLERK_ID=…`)
 # reset local state (SQLite):   rm WhereTheyAt.db && alembic upgrade head
 
 # after changing models.py
