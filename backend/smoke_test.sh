@@ -103,5 +103,28 @@ STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/events/$EVENT_ID/
 echo "landmark as non-creator -> $STATUS"
 [ "$STATUS" = "403" ]
 
+step "9. Set attendance: a fenced stage, a live set, and the self-only read"
+# A stage with its own geofence plus a set playing right now is everything the
+# dwell accumulator needs. Earning a credit takes a WebSocket, so that half lives
+# in scratchpad/dwell_probe.py — here we cover the schedule setup and the read.
+NOW_MINUS=$(python3 -c "import datetime as d; print((d.datetime.now(d.timezone.utc)-d.timedelta(minutes=1)).isoformat())")
+NOW_PLUS=$(python3 -c "import datetime as d; print((d.datetime.now(d.timezone.utc)+d.timedelta(minutes=30)).isoformat())")
+STAGE_ID=$(as_a -X POST "$BASE/events/$EVENT_ID/landmarks" -H 'Content-Type: application/json' \
+  -d '{"name":"Fenced Stage","kind":"stage","lat":37.105,"lng":-122.195,
+       "boundary":[[37.104,-122.196],[37.104,-122.194],[37.106,-122.194],[37.106,-122.196]]}' \
+  | json "['id']")
+echo "stage=$STAGE_ID"
+SET_ID=$(as_a -X POST "$BASE/events/$EVENT_ID/sets" -H 'Content-Type: application/json' \
+  -d "{\"artist\":\"Smoke Test DJ\",\"landmark_id\":\"$STAGE_ID\",
+       \"start_time\":\"$NOW_MINUS\",\"end_time\":\"$NOW_PLUS\"}" | json "['id']")
+echo "set=$SET_ID"
+# Nothing seen yet — A has never pinged inside the fence.
+SEEN=$(as_a "$BASE/users/me/attendance?event_id=$EVENT_ID" | json "" )
+echo "attendance for A -> $SEEN"
+[ "$SEEN" = "[]" ]
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/users/me/attendance")
+echo "unauthenticated attendance read -> $STATUS"
+[ "$STATUS" = "401" ]
+
 echo
 echo "✅ All smoke test steps passed."

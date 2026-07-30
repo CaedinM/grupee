@@ -14,6 +14,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Index,
+    Integer,
     String,
     TypeDecorator,
     UniqueConstraint,
@@ -148,6 +149,45 @@ class Set(Base):
 
     event: Mapped[Event] = relationship(back_populates="sets")
     landmark: Mapped["Landmark | None"] = relationship(back_populates="sets")
+
+
+class SetAttendance(Base):
+    """A set a user is credited with having actually seen.
+
+    The one durable trace of position data. Positions themselves stay ephemeral
+    (Redis, no history), so this can't be computed after the fact — `attendance.py`
+    derives it at ping time from the live socket and persists only the conclusion:
+    "this user was inside this stage's geofence for long enough while this set was
+    playing". No coordinates are stored here.
+
+    `event_id` is denormalized off the set so the per-event read is one join
+    shallower. `dwell_seconds`/`first_seen_at` are kept for debugging the
+    threshold — they're what tell a false credit from a real one.
+    """
+
+    __tablename__ = "set_attendances"
+    # The real idempotency guard: two sockets for the same user (say, mid
+    # reconnect on different workers) can race the Redis dwell state, so the
+    # insert relies on this constraint rather than on having read first.
+    __table_args__ = (
+        UniqueConstraint("user_id", "set_id", name="uq_set_attendance_user_set"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    set_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("sets.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    event_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # When the dwell that earned this credit started, and how much of it had
+    # accumulated when the threshold was crossed.
+    first_seen_at: Mapped[datetime] = mapped_column(TZDateTime, nullable=False)
+    dwell_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    credited_at: Mapped[datetime] = mapped_column(TZDateTime, default=utcnow, nullable=False)
 
 
 class Group(Base):

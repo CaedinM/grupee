@@ -307,3 +307,22 @@ class SetOut(BaseModel):
     start_time: datetime
     end_time: datetime
     created_at: datetime
+
+
+# ---------- Set attendance (acts you saw) ----------
+
+class SetAttendanceOut(BaseModel):
+    """One act the caller was credited with seeing. Carries the set's own fields
+    so the client can render a recap list without also fetching the schedule."""
+
+    set_id: str
+    event_id: str
+    artist: str
+    start_time: datetime
+    end_time: datetime
+    landmark_id: str | None
+    # Nullable for the same reason landmark_id is: deleting a stage only unlinks
+    # its sets (ON DELETE SET NULL).
+    stage_name: str | None
+    first_seen_at: datetime
+    dwell_seconds: int

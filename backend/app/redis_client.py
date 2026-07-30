@@ -10,6 +10,12 @@ One key per user, `loc:<user_id>`, holding a JSON blob of the position, written
 with a TTL so a client that stops reporting expires to "no location" instead of
 freezing on the map forever. There is no history and no per-group copy — exactly
 the invariants the old `locations` table held, now enforced by a flat keyspace.
+
+Three namespaces, all flat: `loc:<user_id>` (above), `groupchan:<group_id>` (the
+pub/sub channel for the WebSocket fan-out), and `dwell:<user_id>` (set-attendance
+accumulator, see `attendance.py`). The last one *is* derived from positions, but
+it's still one bounded key per user with no trail — and it's precisely what lets
+attendance be computed without keeping any position history.
 """
 import json
 import os
@@ -37,6 +43,17 @@ _KEY_PREFIX = "loc:"
 # lands on one uvicorn worker is PUBLISHed here so every other worker can push it
 # to its locally-connected sockets in that group.
 _CHANNEL_PREFIX = "groupchan:"
+# Set-attendance dwell state, one key per user (see app/attendance.py). Lives
+# here rather than in the database for the same reason positions do: it's
+# high-churn, derived, and only the latest value matters. It's also the reason
+# no position history has to be kept — the accumulator carries forward what the
+# expired positions would otherwise have to prove.
+_DWELL_PREFIX = "dwell:"
+
+# Dwell state is garbage-collected, not expired for correctness: it already
+# resets on a set changeover, so this only needs to outlive a single set and
+# clear itself out overnight.
+DWELL_STATE_TTL_SECONDS = int(os.getenv("DWELL_STATE_TTL_SECONDS", "21600"))
 
 # decode_responses so reads come back as str, not bytes. health_check_interval
 # reconnects transparently after Railway drops an idle connection (the Redis
@@ -84,6 +101,10 @@ def _key(user_id: str) -> str:
 
 def channel(group_id: str) -> str:
     return f"{_CHANNEL_PREFIX}{group_id}"
+
+
+def _dwell_key(user_id: str) -> str:
+    return f"{_DWELL_PREFIX}{user_id}"
 
 
 def _build_payload(lat: float, lng: float, heading: float | None,
@@ -154,3 +175,23 @@ async def publish_group(group_id: str, message: dict) -> None:
     """Fan a message out to the group's channel; every worker subscribed to it
     (i.e. every worker holding a socket for this group) receives it."""
     await async_client().publish(channel(group_id), json.dumps(message))
+
+
+async def aread_dwell(user_id: str) -> dict | None:
+    """This user's set-attendance dwell state, or None if they aren't currently
+    accumulating any. A corrupt value reads as None so the accumulator just
+    starts over rather than failing the ping."""
+    raw = await async_client().get(_dwell_key(user_id))
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+async def awrite_dwell(user_id: str, state: dict) -> None:
+    """Upsert the dwell state, refreshing its TTL."""
+    await async_client().set(
+        _dwell_key(user_id), json.dumps(state), ex=DWELL_STATE_TTL_SECONDS
+    )

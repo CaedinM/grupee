@@ -10,6 +10,11 @@ position that lands on one worker is PUBLISHed to the group's channel, and every
 worker holding a socket for that group is SUBSCRIBEd and forwards it to its local
 sockets. Positions still live only in Redis, never Postgres.
 
+The one thing a ping does write to Postgres is set attendance, and only its
+conclusion: `attendance.on_position` folds each position into a dwell counter and
+persists a row when a user has been inside a stage's geofence long enough to have
+seen the act. No coordinates are stored — see `app/attendance.py`.
+
 The backend is deliberately synchronous SQLAlchemy, so every DB touch here runs
 through `run_in_threadpool` — a blocking query on the event loop would stall
 every socket on the worker.
@@ -25,7 +30,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from . import models, redis_client, schemas
+from . import attendance, models, redis_client, schemas
 from .auth import verify_clerk_token
 from .database import SessionLocal
 from .logging_config import logger
@@ -48,12 +53,15 @@ class _Reject(Exception):
         self.code = code
 
 
-def _authorize(group_id: str, clerk_id: str) -> tuple[str, list[tuple]]:
+def _authorize(group_id: str, clerk_id: str) -> tuple[str, str | None, list[tuple]]:
     """Resolve the caller, assert group membership and event liveness, and return
-    `(user_id, roster)` where roster is a list of
+    `(user_id, event_id, roster)` where roster is a list of
     `(user_id, display_name, avatar_url, role)` tuples — the same roster the
     `GET /groups/{id}/locations` read builds, materialized so it can be used
     after the session closes. Raises `_Reject` with a close code on any failure.
+
+    `event_id` rides along for the set-attendance accumulator; it comes off the
+    group row already loaded here, so it costs no extra query.
 
     Runs in a threadpool (sync SQLAlchemy); opens its own short-lived session.
     """
@@ -89,7 +97,7 @@ def _authorize(group_id: str, clerk_id: str) -> tuple[str, list[tuple]]:
             .order_by(models.Membership.joined_at)
         ).all()
         roster = [(r.user_id, r.display_name, r.avatar_url, r.role) for r in rows]
-        return user.id, roster
+        return user.id, group.event_id, roster
     finally:
         db.close()
 
@@ -203,7 +211,9 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-async def _handle_message(group_id: str, user_row: tuple, conn: str, raw: str) -> None:
+async def _handle_message(
+    group_id: str, event_id: str | None, user_row: tuple, conn: str, raw: str
+) -> None:
     """A client frame. Only `loc` is meaningful; a heartbeat is the same message
     (re-stamps updated_at and refreshes the TTL). Writes to Redis, then publishes
     the new position to the group's channel.
@@ -243,6 +253,15 @@ async def _handle_message(group_id: str, user_row: tuple, conn: str, raw: str) -
         },
     )
 
+    # Set attendance, folded in AFTER the fan-out so it never adds latency to a
+    # peer's position. It's a side feature riding on the location stream, so it
+    # must never be able to break it: any failure in here is logged and swallowed
+    # rather than escaping into the receive loop and closing the socket.
+    try:
+        await attendance.on_position(event_id, user_id, loc.lat, loc.lng)
+    except Exception:
+        logger.exception("Attendance update failed for user %s", user_id)
+
 
 @router.websocket("/ws/groups/{group_id}")
 async def group_socket(websocket: WebSocket, group_id: str):
@@ -262,7 +281,7 @@ async def group_socket(websocket: WebSocket, group_id: str):
         return
 
     try:
-        user_id, roster = await run_in_threadpool(_authorize, group_id, clerk_id)
+        user_id, event_id, roster = await run_in_threadpool(_authorize, group_id, clerk_id)
     except _Reject as reject:
         await websocket.close(code=reject.code)
         return
@@ -306,7 +325,7 @@ async def group_socket(websocket: WebSocket, group_id: str):
         while True:
             raw = await websocket.receive_text()
             if self_row is not None:
-                await _handle_message(group_id, self_row, conn_id, raw)
+                await _handle_message(group_id, event_id, self_row, conn_id, raw)
     except WebSocketDisconnect:
         pass
     finally:

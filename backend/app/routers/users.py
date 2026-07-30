@@ -61,6 +61,45 @@ def get_me(user: models.User = Depends(get_current_user)):
     return user
 
 
+# Self-only by construction: there is no user id in the path, so there's nothing
+# to spoof and no require_self to forget.
+@router.get("/users/me/attendance", response_model=list[schemas.SetAttendanceOut])
+def list_my_attendance(
+    event_id: str | None = None,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The acts the caller was credited with seeing, in schedule order.
+
+    Rows are written by the dwell accumulator on the location socket
+    (`app/attendance.py`) — one per set, once earned. `event_id` narrows to a
+    single festival; omitted, it's every act they've ever seen.
+    """
+    stmt = (
+        select(
+            models.SetAttendance.set_id,
+            models.SetAttendance.event_id,
+            models.SetAttendance.first_seen_at,
+            models.SetAttendance.dwell_seconds,
+            models.Set.artist,
+            models.Set.start_time,
+            models.Set.end_time,
+            models.Set.landmark_id,
+            models.Landmark.name.label("stage_name"),
+        )
+        .join(models.Set, models.Set.id == models.SetAttendance.set_id)
+        # Outer: a deleted stage unlinks its sets rather than removing them.
+        .outerjoin(models.Landmark, models.Landmark.id == models.Set.landmark_id)
+        .where(models.SetAttendance.user_id == user.id)
+        .order_by(models.Set.start_time)
+    )
+    if event_id is not None:
+        stmt = stmt.where(models.SetAttendance.event_id == event_id)
+    return [
+        schemas.SetAttendanceOut(**row._mapping) for row in db.execute(stmt).all()
+    ]
+
+
 @router.get("/users/{user_id}", response_model=schemas.UserOut)
 def get_user(user_id: str, _: str = Depends(get_clerk_id), db: Session = Depends(get_db)):
     return get_user_or_404(db, user_id)
