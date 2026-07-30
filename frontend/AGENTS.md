@@ -15,7 +15,7 @@ invariant, because the next agent will trust it.
 
 ## What this is
 
-The WhereTheyAt client: an Expo / React Native app for a festival friend-finder. iOS via
+The Grupee client: an Expo / React Native app for a festival friend-finder. iOS via
 Expo Go is the real target; `npm run web` (react-native-web) exists for quick UI checks and
 gets a degraded map. Backend contract and the hot paths it cares about are in
 `../backend/CLAUDE.md`; the product spec is `../spec.md`.

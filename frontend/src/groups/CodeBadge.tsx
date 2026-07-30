@@ -24,7 +24,7 @@ export default function CodeBadge({
 
   const share = () =>
     Share.share({
-      message: `Join my crew "${groupName}" on WhereTheyAt with code ${code}`,
+      message: `Join my crew "${groupName}" on Grupee with code ${code}`,
     }).catch(() => {});
 
   return (

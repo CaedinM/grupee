@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Smoke test for the WhereTheyAt backend — exercises the full acceptance flow.
+# Smoke test for the Grupee backend — exercises the full acceptance flow.
 # Usage: ./smoke_test.sh [base_url]   (default http://127.0.0.1:8000)
 # Requires: curl, python3 (for JSON parsing)
 #

@@ -24,7 +24,7 @@ function LoginPage() {
     <main className="login">
       <header className="brand">
         <div className="brand-row">
-          <h1 className="wordmark">WhereTheyAt?</h1>
+          <h1 className="wordmark">Grupee</h1>
           <span className="ops-badge">OPS</span>
         </div>
         <p className="brand-sub">Observe usage · create events · set geofences</p>
@@ -102,7 +102,7 @@ function AdminGate() {
     return (
       <main className="center">
         <p className="status-tag error">NO PROFILE</p>
-        <h2>This account has no WhereTheyAt profile yet</h2>
+        <h2>This account has no Grupee profile yet</h2>
         <p>
           Sign in to the phone app once with {email ?? "this account"} to create it, then grant
           admin in the database and come back.
@@ -207,7 +207,7 @@ function Shell({
     const topbar = (
       <header className="topbar">
         <div className="topbar-brand">
-          <h1 className="wordmark">WhereTheyAt?</h1>
+          <h1 className="wordmark">Grupee</h1>
           <span className="ops-badge">OPS</span>
         </div>
         <div className="topbar-user">
@@ -247,7 +247,7 @@ function Shell({
     <>
       <header className="topbar">
         <div className="topbar-brand">
-          <h1 className="wordmark">WhereTheyAt?</h1>
+          <h1 className="wordmark">Grupee</h1>
           <span className="ops-badge">OPS</span>
         </div>
         <div className="topbar-user">

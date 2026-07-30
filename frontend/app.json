@@ -30,13 +30,13 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "WhereTheyAt shares your live location with your crew during the festival."
+          "locationWhenInUsePermission": "Grupee shares your live location with your crew during the festival."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "WhereTheyAt needs access to your photos so you can pick a profile picture."
+          "photosPermission": "Grupee needs access to your photos so you can pick a profile picture."
         }
       ],
       "expo-secure-store",

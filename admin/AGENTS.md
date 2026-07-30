@@ -1,4 +1,4 @@
-# AGENTS.md — WhereTheyAt Ops console
+# AGENTS.md — Grupee Ops console
 
 ## Keep this file current
 
@@ -9,7 +9,7 @@ worse than none, because the next agent will trust it.
 
 ## What this is
 
-The **operator console** for WhereTheyAt — a Vite + React single-page app where
+The **operator console** for Grupee — a Vite + React single-page app where
 festival admins create events, draw geofence boundaries, place landmarks, and
 schedule sets. It is a separate package from the phone app (`../frontend`) and
 the backend (`../backend`); the three meet only at the HTTP contract in
@@ -56,7 +56,7 @@ Cross-file invariants that matter when changing things:
   calls `getMe(token)` and branches on the local row's `is_admin`, not on any
   Clerk role or metadata. Its states are `loading` → then one of: `ready`
   (is_admin true → `Shell`), `denied` (signed in, profile exists, not an admin),
-  `no-profile` (getMe 404 — the account has never provisioned a WhereTheyAt
+  `no-profile` (getMe 404 — the account has never provisioned a Grupee
   profile), or `error` (backend unreachable). `is_admin` is granted **only by a
   direct database update** — there is no endpoint and no self-serve toggle
   (any client can claim any user_id, so a toggle would make everyone an admin).

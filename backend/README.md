@@ -1,6 +1,6 @@
-# WhereTheyAt backend
+# Grupee backend
 
-REST backend for **WhereTheyAt**, a festival friend-finder. iOS clients register a user, report their GPS position every ~1.5 s, and poll their group's locations every ~2 s. Events (festivals) hold a shared boundary polygon and landmark pins that groups can link to.
+REST backend for **Grupee**, a festival friend-finder. iOS clients register a user, report their GPS position every ~1.5 s, and poll their group's locations every ~2 s. Events (festivals) hold a shared boundary polygon and landmark pins that groups can link to.
 
 FastAPI · SQLAlchemy 2.0 (sync) · Pydantic v2 · PostgreSQL (local + production; SQLite still works as a fallback) · Redis for live positions.
 

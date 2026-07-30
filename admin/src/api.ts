@@ -1,4 +1,4 @@
-// Thin client for the WhereTheyAt backend. Every call sends the Clerk session
+// Thin client for the Grupee backend. Every call sends the Clerk session
 // JWT as a bearer token; the backend maps its `sub` claim to users.clerk_id.
 
 export const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";

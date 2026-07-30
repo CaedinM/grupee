@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="WhereTheyAt",
+    title="Grupee",
     description="Festival friend-finder backend",
     lifespan=lifespan,
 )

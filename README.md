@@ -180,7 +180,7 @@ Reset local data anytime (`make reset` wraps both lines):
 
 ```bash
 dropdb wheretheyat_dev && createdb wheretheyat_dev && alembic upgrade head   # SQL
-redis-cli flushall                                                           # live positions
+redis-cli flushdb                                                            # live positions (DB 0)
 ```
 
 ### Retry the first-time-login flow

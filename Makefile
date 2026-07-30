@@ -1,4 +1,4 @@
-# WhereTheyAt — local dev shortcuts.
+# Grupee — local dev shortcuts.
 #
 # One discoverable entrypoint tying the three packages together. Run `make` (or
 # `make help`) to list targets. Recipes call the backend venv binaries directly
@@ -18,7 +18,7 @@ PSQL     = psql -d $(DB_NAME)
 .PHONY: help backend backend-dev admin mobile migrate reset reset-user grant-admin users smoke verify
 
 help: ## List the available commands
-	@echo "WhereTheyAt local dev — make <target>"
+	@echo "Grupee local dev — make <target>"
 	@echo
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'

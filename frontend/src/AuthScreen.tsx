@@ -150,7 +150,7 @@ export default function AuthScreen() {
       <Reveal>
         <Text style={styles.eyebrow}>{signingIn ? "Welcome back" : "First time"}</Text>
         {/* The wordmark is the one place the display face runs full width. */}
-        <Text style={styles.wordmark}>WhereTheyAt</Text>
+        <Text style={styles.wordmark}>Grupee</Text>
         <Text style={[type.subtitle, styles.lede]}>
           {signingIn
             ? "Sign in and find your crew in the crowd."
