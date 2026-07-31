@@ -205,7 +205,7 @@ export default function GroupView({
         onRequestClose={() => !leaving && setConfirmingLeave(false)}
       >
         <Pressable
-          style={styles.confirmOverlay}
+          style={styles.sheetOverlay}
           onPress={() => !leaving && setConfirmingLeave(false)}
         >
           {/* Swallow taps on the card so the backdrop press doesn't dismiss it. */}

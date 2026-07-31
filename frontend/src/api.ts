@@ -271,6 +271,30 @@ export function listSets(eventId: string): Promise<EventSet[]> {
   return request<EventSet[]>(`/events/${eventId}/sets`);
 }
 
+// One act the signed-in user was credited with seeing. Rows are written by the
+// backend's dwell accumulator on the location socket, so this is a read-only
+// record — there is no way to add one from the client. It carries the set's own
+// fields so a recap renders without also fetching the schedule; `stage_name` is
+// null when the stage has since been deleted (its sets are unlinked, not removed).
+export interface SetAttendance {
+  set_id: string;
+  event_id: string;
+  artist: string;
+  start_time: string;
+  end_time: string;
+  landmark_id: string | null;
+  stage_name: string | null;
+  first_seen_at: string;
+  dwell_seconds: number;
+}
+
+/** The acts the signed-in user saw, in schedule order. Self-only by construction
+ * — there is no user id in the path, and no endpoint for anyone else's. */
+export function listMyAttendance(eventId?: string): Promise<SetAttendance[]> {
+  const query = eventId ? `?event_id=${encodeURIComponent(eventId)}` : "";
+  return request<SetAttendance[]>(`/users/me/attendance${query}`);
+}
+
 // Creator/joiner identity comes from the auth token, not the body.
 export function createGroup(name: string, eventId: string): Promise<Group> {
   return request<Group>("/groups", {

@@ -87,6 +87,16 @@ Cross-file invariants that matter when changing things:
   second covers ones that end during a session. The create-group event picker filters to
   the same definition (`hasNotEnded`, in `src/groups/events.ts`), so a finished festival is
   never offered as an option.
+- **A past group's card opens a recap, and the recap is self-only.** Tapping a card in
+  "My previous groups" opens `src/groups/PastGroupRecap.tsx` — the event's name and dates,
+  the crew as avatar chips, and a "Who I saw" list of the acts the *signed-in user* was
+  credited with attending. Those come from `listMyAttendance(eventId)`
+  (`GET /users/me/attendance`), whose rows the backend writes from a dwell accumulator on
+  the location socket; there is no endpoint for a groupmate's attendance and no way to
+  create a row from the client, so don't build UI that implies either. The sheet reuses the
+  roster `PastGroupCard` already fetched and loads attendance lazily on first open — the
+  chooser can list many finished festivals and none of them need it until tapped. Rows are
+  final once the festival is over, so a successful load is never refetched.
 - **All three screens stay mounted**, hidden with `display: "none"` rather than unmounted,
   so the map keeps its camera position across tab switches. Anything expensive in a screen
   must therefore be gated on props, not on mount. A corollary for animation: an entrance

@@ -1,0 +1,16 @@
+{
+    "cli": { "version": ">= 16.0.0" },
+    "build": {
+      "production": {
+        "distribution": "store",
+        "ios": { "autoIncrement": "buildNumber" },
+        "env": {
+          "EXPO_PUBLIC_API_URL": "https://wyat-production.up.railway.app",
+          "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_aGVscGVkLWltcGFsYS0zMC5jbGVyay5hY2NvdW50cy5kZXYk"
+        }
+      }
+    },
+    "submit": {
+      "production": { "ios": {} }
+    }
+  }

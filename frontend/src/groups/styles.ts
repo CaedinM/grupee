@@ -303,6 +303,84 @@ export const styles = StyleSheet.create({
     width: "100%",
   },
 
+  // The whole card is the hit target for the recap sheet, so it says so with a
+  // chevron on the title row rather than a button of its own.
+  pastTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.sm,
+  },
+
+  /* ------------------------------------------------------------ recap */
+
+  recapCard: {
+    width: "100%",
+    maxWidth: 440,
+  },
+  recapBody: {
+    padding: space.xl,
+  },
+  recapHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: space.md,
+  },
+  recapHeaderText: {
+    flex: 1,
+  },
+  recapClose: {
+    padding: space.xs,
+    marginTop: -space.xs,
+    marginRight: -space.xs,
+  },
+  recapTitle: {
+    fontFamily: font.display,
+    color: color.text,
+    fontSize: 26,
+    lineHeight: 30,
+    letterSpacing: -0.9,
+  },
+  recapDates: {
+    fontFamily: font.mono,
+    color: color.textFaint,
+    fontSize: 11,
+    letterSpacing: -0.2,
+    marginTop: space.xs,
+  },
+  recapEmpty: {
+    fontFamily: font.sans,
+    color: color.textFaint,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  recapSeenList: {
+    marginTop: space.xs,
+  },
+  recapSeenRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: space.md,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+  },
+  recapSeenText: {
+    flex: 1,
+  },
+  // Artists get the display face here for the same reason they do on the
+  // lineup screen — they're the names the recap is about.
+  recapArtist: {
+    fontFamily: font.displaySemi,
+    color: color.text,
+    fontSize: 15,
+    letterSpacing: -0.3,
+  },
+  recapSeenMeta: {
+    fontFamily: font.sans,
+    color: color.textFaint,
+    fontSize: 11.5,
+    marginTop: 1,
+  },
+
   /* ------------------------------------------------------------ event */
 
   eventOption: {
@@ -375,9 +453,9 @@ export const styles = StyleSheet.create({
 
   /* ------------------------------------------------- leave confirmation */
 
-  // Dims the whole screen behind the dialog so the confirmation reads as a
-  // modal step rather than an inline panel.
-  confirmOverlay: {
+  // Dims the whole screen behind anything modal — the leave confirmation and
+  // the past-group recap — so it reads as a step rather than an inline panel.
+  sheetOverlay: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",

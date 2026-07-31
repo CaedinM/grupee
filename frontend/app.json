@@ -1,14 +1,16 @@
 {
   "expo": {
-    "name": "frontend",
-    "slug": "frontend",
+    "name": "Grupee",
+    "slug": "grupee",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.caedinm.frontend"
+      "bundleIdentifier": "com.caedinm.grupee",
+    "buildNumber": "1",
+    "supportsTablet": true,
+    "config": { "usesNonExemptEncryption": false }
     },
     "android": {
       "adaptiveIcon": {

@@ -33,3 +33,12 @@ export function formatEventDates(
   }
   return `${dayMonth(start)} – ${full(end)}`;
 }
+
+/** "Sat 9:30 PM" — when a set ran, for a recap of a multi-day festival where
+ * the time alone wouldn't say which night it was. */
+export function formatSetSlot(startsAt: string): string {
+  const d = new Date(startsAt);
+  const day = d.toLocaleDateString([], { weekday: "short" });
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return `${day} ${time}`;
+}
