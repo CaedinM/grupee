@@ -8,9 +8,11 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.caedinm.grupee",
-    "buildNumber": "1",
-    "supportsTablet": true,
-    "config": { "usesNonExemptEncryption": false }
+      "buildNumber": "2",
+      "supportsTablet": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +24,8 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -44,6 +47,12 @@
       "expo-secure-store",
       "expo-web-browser",
       "expo-font"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "276ebaa0-b4e6-413c-a672-692fccdeff8a"
+      }
+    },
+    "owner": "caedinm"
   }
 }

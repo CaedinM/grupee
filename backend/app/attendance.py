@@ -19,9 +19,9 @@ combination is what separates someone who watched a set from someone who cut
 across the field on their way to another stage.
 
 Dwell is *sampled*, not measured: a stationary client only sends a heartbeat
-every 180s, so it is credited on the first beat at or past the threshold —
-10–12 minutes of real presence for the default 600s. A moving client pings far
-more often and lands much closer to 10:00.
+every 180s, and the first ping merely opens the segment, so credit lands on the
+first beat at or past the threshold — 6 minutes of real presence for the default
+240s. A moving client pings far more often and lands much closer to 4:00.
 """
 import os
 import time
@@ -39,14 +39,27 @@ from .logging_config import logger
 
 # How much dwell inside a stage's geofence, while a set is live, counts as having
 # seen it. Env-overridable mostly so the flow is testable in seconds.
-SEEN_DWELL_SECONDS = int(os.getenv("SEEN_DWELL_SECONDS", "600"))
+#
+# 240 (4 min) is deliberately shorter than a typical set: because dwell is
+# sampled at the client's 180s heartbeat and the first ping only opens the
+# segment, the *effective* bar for a stationary user is the ping at or past the
+# threshold — 6 minutes of real presence. A threshold near a set's own length
+# leaves no margin for a missed beat, and short sets could never be credited at
+# all (a 30-minute headline slot and an 8-minute opener have to both work).
+SEEN_DWELL_SECONDS = int(os.getenv("SEEN_DWELL_SECONDS", "240"))
 
 # The longest silence between two pings we're still willing to credit as
 # continuous presence. INVARIANT: keep this comfortably greater than the client's
 # 180s heartbeat (`frontend/src/useLocationReporting.ts`) — at or below it, a
 # stationary user's dwell would never accumulate at all. A longer gap (app
 # killed, phone in a dead spot) credits nothing but keeps the running total.
-MAX_PING_GAP_SECONDS = int(os.getenv("MAX_PING_GAP_SECONDS", "300"))
+#
+# 420 is 2.3× the heartbeat, so a *single* dropped beat — routine on iOS when the
+# app backgrounds — still reads as continuous presence. At the old 300 it didn't:
+# one missed beat made a 360s gap, which was over the limit and forfeited the
+# whole segment, so a user standing still through a set could end up credited
+# with half the time they were actually there.
+MAX_PING_GAP_SECONDS = int(os.getenv("MAX_PING_GAP_SECONDS", "420"))
 
 # Stages and schedules are cold, admin-authored data; re-reading them per ping
 # would put a database query back on the hot path. Cached per worker, so an admin
