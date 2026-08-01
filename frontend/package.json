@@ -34,6 +34,11 @@
     "@types/react": "~19.1.10",
     "typescript": "~5.9.2"
   },
+  "//overrides": "Clerk's nested packages (clerk-js, clerk-react, shared) peer on react ~19.1.4, which our SDK-pinned 19.1.0 doesn't satisfy. npm 10 (what EAS Build runs) resolves that by installing a second, nested react@19.2.x; npm 11 (local) does not — so a lock generated here failed `npm ci` there. Forcing one react keeps the tree identical under both, and React must be a singleton in RN anyway.",
+  "overrides": {
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
   "scripts": {
     "start": "expo start --offline",
     "start:staging": "EXPO_PUBLIC_API_URL=https://wyat-staging.up.railway.app expo start --offline --clear",
