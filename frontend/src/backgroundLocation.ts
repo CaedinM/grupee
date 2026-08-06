@@ -21,10 +21,10 @@ import { readBackgroundSession } from "./backgroundSession";
  * it needs from SecureStore (`backgroundSession.ts`) and speaks HTTP. If you
  * find yourself importing a hook here, the design has been broken.
  *
- * Requires a development build — background location does not work in Expo Go.
- * Every entry point below degrades to a no-op when TaskManager is unavailable,
- * so `npm start` against Expo Go still runs the app with today's foreground-only
- * behavior instead of crashing.
+ * Requires a development build; the app dropped Expo Go for exactly this reason.
+ * Every entry point below still degrades to a no-op when TaskManager is
+ * unavailable — `npm run web` has no OS-level task — so those platforms fall
+ * back to foreground-only reporting instead of crashing.
  */
 
 export const BG_LOCATION_TASK = "wta-background-location";

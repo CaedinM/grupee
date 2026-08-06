@@ -31,250 +31,134 @@ Three standalone packages, no workspace tooling; they meet at the HTTP contract.
 - **DevTools:** Claude Code (Fable 5 + Opus 4.8), Cursor
 - **Cloud Services:** Railway, Cloudflare R2 (Object Storage)
 
+---
 
-# Setup (first time, after cloning)
+# Setup
 
-Do this once per machine to get all three packages ready to run.
+Once per machine.
 
-### Prerequisites
-
-- **Python 3.11+** and **Node 20+**
-- **Homebrew** (macOS) — for Postgres and Redis (no Docker needed)
-- The **Expo Go** app on your phone, or **Xcode** for the iOS simulator
-- The **Clerk publishable key** (`pk_test_…`) — the *same* value for all three packages;
-  from the Clerk dashboard → API Keys, or from a teammate
-
-### 1. Backend
+**You need:** Python 3.11+, Node 20+, Homebrew, Xcode, an Expo account, and the Clerk
+publishable key (`pk_test_…` — Clerk dashboard → API Keys, same value everywhere).
 
 ```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# Postgres + Redis — one-time install; brew services auto-starts them at every login
+# 1. Databases — one-time; brew auto-starts them at every login
 brew install postgresql@14 redis
 brew services start postgresql@14 && brew services start redis
 createdb wheretheyat_dev
 
-cp .env.example .env          # then fill it in (see "Env files" below)
-alembic upgrade head          # build the schema
+# 2. Backend
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+alembic upgrade head
+
+# 3. Clients
+cd ../frontend && npm install
+cd ../admin && npm install
 ```
 
-### 2. Frontend
+**Create three `.env` files** — all gitignored, same Clerk key in each:
+
+| File | Contents |
+|---|---|
+| `backend/.env` | `CLERK_PUBLISHABLE_KEY=pk_test_…`<br>`DATABASE_URL=postgresql://<you>@localhost:5432/wheretheyat_dev` |
+| `frontend/.env` | `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_…` |
+| `admin/.env` | `VITE_CLERK_PUBLISHABLE_KEY=pk_test_…` |
+
+`<you>` is your macOS username (Homebrew Postgres uses trust auth, no password).
+**Don't set `EXPO_PUBLIC_API_URL` or `VITE_API_URL`** — they override everything and pin that
+client to one backend.
+
+### Install the iOS dev client
+
+The app does **not** run in Expo Go — background location needs a native task Expo Go can't
+run. Build the dev client once:
 
 ```bash
 cd frontend
-npm install
-# create frontend/.env (see below). Pinned to Expo SDK 54 until Expo Go ships 57.
+npx eas build --profile development-simulator --platform ios
+# then, from the artifact URL it prints:
+tar -xzf <artifact>.tar.gz
+xcrun simctl install booted Grupee.app
 ```
 
-### 3. Admin
+Rebuild **only** when `app.json` or a native dependency changes. JS changes just need Metro.
 
-```bash
-cd admin
-npm install
-# create admin/.env (see below).
-# .env.staging / .env.production already exist (committed) — they hold the backend URLs.
-```
+### Clerk JWT template
 
-### Env files to create
-
-All three are **gitignored**. The Clerk publishable key is identical in all of them.
-
-| File | Required | Optional |
-|---|---|---|
-| `backend/.env` | `CLERK_PUBLISHABLE_KEY=pk_test_…`<br>`DATABASE_URL=postgresql://<you>@localhost:5432/wheretheyat_dev` | `REDIS_URL` (default `redis://localhost:6379/0`), `LOG_LEVEL` |
-| `frontend/.env` | `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_…` | `EXPO_PUBLIC_API_URL` — **leave unset** for local dev (the env scripts handle staging/prod) |
-| `admin/.env` | `VITE_CLERK_PUBLISHABLE_KEY=pk_test_…` | `VITE_API_URL` — leave unset for local dev |
-
-`<you>` is your macOS username (Homebrew Postgres uses trust auth, no password).
-`backend/.env.example` documents every backend variable.
-
-> **Leave the API-URL var out of the client `.env` files.** If `EXPO_PUBLIC_API_URL` /
-> `VITE_API_URL` is set there it overrides *everything*, including `npm start` / `npm run
-> dev`, and pins that client to one backend. The per-environment scripts below are the
-> intended way to choose a backend.
+Clerk dashboard → **JWT Templates** → new template named `background`, lifetime `43200`,
+claims `{"scope": "bg-location"}`. This is what lets the app report location while minimized;
+without it everything works but background tracking stays off.
 
 ---
 
-# Running the app
+# Running it
 
-## Local development with `make`
+All from the repo root. `make <package>` is local, `make <package>-staging` is deployed
+staging. Run `make` on its own to list everything.
 
-A root `Makefile` wraps the everyday local-dev commands into one entrypoint. **Run every
-`make` target from the repo root** — each recipe `cd`s into the right package itself, so
-you never have to. `make` (or `make help`) prints the list any time.
+### Local — three terminals
 
-Prerequisites are the one-time setup above: Homebrew Postgres + Redis running, a
-`backend/.venv` with deps installed, and `node_modules` in `admin/` and `frontend/`.
+```bash
+make backend     # FastAPI on :8000
+make frontend    # Metro — press i for the simulator
+make admin       # admin console on :5173
+```
 
-**Run the apps** — the everyday loop is three terminals, one per app:
+### Staging — no local backend needed
+
+```bash
+make frontend-staging
+make admin-staging
+```
+
+Staging is Railway with its own throwaway Postgres + Redis, so poke at it freely. Its database
+starts **empty**: first time you point at it, open the admin console, grant yourself admin
+there, and create an event — the app can't make a group without one.
+
+### Production — admin console only
+
+```bash
+cd admin && npm run dev:prod
+```
+
+That's the **only** command that touches production, and it's for creating real festivals, not
+testing. The app itself can't reach prod from a dev machine at all — there's no `start:prod`
+script, and users get the app through TestFlight (`eas build --profile production`, see
+`shipping.md`). Never run `smoke_test.sh` against prod; it writes junk users and events.
+
+### Everything else
 
 | Command | What it does |
 |---|---|
-| `make backend` | FastAPI with `--reload`, bound to `0.0.0.0` so your phone can reach it over Wi-Fi. **Real Clerk auth** — this is what the clients actually talk to. |
-| `make admin` | Admin console at `http://localhost:5173`, pointed at `localhost:8000`. |
-| `make mobile` | Expo dev server; the phone app auto-detects your Mac's LAN IP (scan the QR in Expo Go, or press `i` for the simulator). |
+| `make reset` | Wipe the DB + Redis and re-migrate — clean slate |
+| `make users` | List users (where you find your `clerk_id`) |
+| `make grant-admin CLERK_ID=user_xxx` | Required to get into the admin console |
+| `make migrate` | Apply new migrations without wiping data |
+| `make verify` | Typecheck both clients |
+| `make smoke` | Backend e2e test (needs `make backend-dev` in another terminal) |
 
-**Database & first-time login** (see the runbook below for how these fit together):
+Auth is real Clerk everywhere. Signing in against an empty DB drops you on the name screen and
+provisions your user — so `make reset` is also how you re-test the first-login flow. Confirm
+which backend a client is hitting in the app's **Profile tab** (it prints the URL).
 
-| Command | What it does |
-|---|---|
-| `make reset` | Drop + recreate the DB, re-run migrations, and flush Redis — a full clean slate. |
-| `make reset-user CLERK_ID=user_xxx` | Delete just one user (keeps their events) so their next login re-provisions. |
-| `make grant-admin CLERK_ID=user_xxx` | Set `is_admin=true` — the only way past the admin-console gate. |
-| `make users` | List users (this is where you find your `clerk_id`). |
-| `make migrate` | `alembic upgrade head` — apply pending migrations without wiping data. |
+---
 
-**Checks:**
+# Reference
 
-| Command | What it does |
-|---|---|
-| `make backend-dev` | Run the backend with `AUTH_DEV_MODE=1` (keyless) — needed only so `make smoke` can create throwaway users. |
-| `make smoke` | Run the backend e2e smoke test (needs `make backend-dev` running in another terminal). |
-| `make verify` | Typecheck both clients (`admin` + `frontend`) — a static preflight before pushing to staging. |
+**Choosing a backend.** `start:staging` sets `EXPO_PUBLIC_API_URL` inline and passes `--clear`
+— required, because the URL is baked into the JS bundle and Metro caches it. The admin's
+`dev:staging` loads the committed `admin/.env.staging`. Plain `npm start` / `npm run dev` use
+your local backend. Railway setup lives in `backend/README.md`.
 
-> `make` deliberately covers **local** only. Staging / production are chosen with the
-> `npm run …:staging` / `…:prod` client scripts below, so an accidental `make` never points
-> at a deployed backend.
+**Adding a frontend dependency.** EAS builds on Node 20 / npm 10; this machine runs Node 24 /
+npm 11, and npm 11 can write a lockfile npm 10 rejects — the build then fails in "Install
+dependencies" while `npm ci` passes locally. Verify with `npx npm@10 ci` in a scratch copy of
+`package.json` + `package-lock.json`, and regenerate with
+`npx npm@10 install --package-lock-only` if it fails.
 
-Everything below is the same thing spelled out manually.
-
-The clients bake in **one backend URL per run**, chosen by which command you use:
-
-| | Local backend | Staging | Production |
-|---|---|---|---|
-| **Frontend App** (Expo) | `npm start` | `npm run start:staging` | `npm run start:prod` |
-| **Admin Platform** (Vite) | `npm run dev` | `npm run dev:staging` | `npm run dev:prod` |
-
-Confirm the live target any time in the app's **Profile tab** (it prints the base URL).
-
-### Expo Go vs. a development build
-
-Location now has two modes, and only one of them works in Expo Go:
-
-| | Expo Go (`npm start`) | Dev build (`npm run start:dev`) |
-|---|---|---|
-| UI, groups, map, events | ✅ | ✅ |
-| Live location while the app is **open** | ✅ | ✅ |
-| Location while **minimized** | ❌ silently off | ✅ |
-| "Always" permission, Android foreground service | ❌ | ✅ |
-
-Expo Go can't run an OS-level background task, so `npm start` passes `--go` and the app just
-behaves as it always did — fine for everyday UI work. To test background tracking or set
-attendance for real, build a dev client once and use `npm run start:dev`:
-
-```bash
-cd frontend
-npx eas build --profile development --platform ios   # once; install the result on the device
-npm run start:dev
-```
-
-Background reports also need a **Clerk JWT template** named `background` (Dashboard → JWT
-Templates): lifetime `43200` seconds, custom claim `{"scope": "bg-location"}`. Without it the
-app stays foreground-only rather than failing — `getBackgroundToken()` returns null and
-`ProfileScreen` shows background sharing as unavailable.
-
-## Local dev — everything on your machine, in Expo Go
-
-Postgres and Redis are already running (they auto-start at login — check with
-`brew services list`). The backend does **not** start them; it just connects. You need
-two terminals:
-
-```bash
-# Terminal 1 — backend. --host 0.0.0.0 so your phone can reach it over Wi-Fi.
-cd backend && source .venv/bin/activate
-uvicorn app.main:app --reload --host 0.0.0.0
-
-# Terminal 2 — the phone app
-cd frontend && npm start          # then scan the QR code with Expo Go
-```
-
-With `EXPO_PUBLIC_API_URL` unset, the app derives your Mac's LAN IP from the Expo dev
-server and hits your local backend on `:8000` — so **your phone and Mac must be on the
-same Wi-Fi**. (The iOS simulator uses `localhost` and needs no Wi-Fi: press `i` in the
-Expo terminal.)
-
-For the admin console against the same local backend (separate terminal):
-
-```bash
-cd admin && npm run dev           # http://localhost:5173 → talks to localhost:8000
-```
-
-Auth is real Clerk in local dev (the app sends real tokens, the backend verifies them).
-Reset local data anytime (`make reset` wraps both lines):
-
-```bash
-dropdb wheretheyat_dev && createdb wheretheyat_dev && alembic upgrade head   # SQL
-redis-cli flushdb                                                            # live positions (DB 0)
-```
-
-### Retry the first-time-login flow
-
-The "first login" is just a Clerk account with **no `users` row yet** — so emptying the DB
-turns any existing login back into a first-timer.
-
-1. `make reset` — empties the DB (+ live positions).
-2. Open a client and sign in with your usual Clerk account. With no profile row, `GET
-   /users/me` 404s and the app drops you on the name/registration screen → `POST /users`
-   provisions a fresh row (201).
-3. Need the admin console? `make users` to read your `clerk_id`, then
-   `make grant-admin CLERK_ID=user_xxx`.
-
-Faster variant that keeps your seeded events: `make reset-user CLERK_ID=user_xxx`, then
-reopen the client to re-register.
-
-Backend test suite (walks the full acceptance flow) — needs a dev-auth server:
-
-```bash
-AUTH_DEV_MODE=1 uvicorn app.main:app --reload   # one terminal
-./smoke_test.sh                                 # another
-```
-
-`AUTH_DEV_MODE=1` skips Clerk verification — **dev/test only, never deployed.**
-
-## Staging — clients against the deployed staging backend
-
-No local backend needed; staging runs on Railway with its own **throwaway** Postgres +
-Redis, so you can poke at it freely without touching production.
-
-```bash
-cd frontend && npm run start:staging   # Expo Go → staging (scan the QR)
-cd admin    && npm run dev:staging     # browser → staging
-```
-
-Staging's databases start **empty**, so the first time you point there: sign into the
-admin console and **create an event** before the phone app can create a group against it,
-and your phone profile re-registers via the name screen (no user row exists yet).
-
-## Production — clients against the live backend (avoid for testing)
-
-Devs shouldn't test against production — its data is real users. But when you need to
-verify a release or reproduce a reported bug, the clients reach it the same way:
-
-```bash
-cd frontend && npm run start:prod      # Expo Go → production
-cd admin    && npm run dev:prod        # browser → production
-```
-
-**Never** run `smoke_test.sh` against production — it writes throwaway users, groups, and
-events into live data. Use local or staging for that.
-
-> **How real users get the app** is a separate thing entirely — it's a native app, not a
-> URL, so it ships through TestFlight / the App Store via EAS Build. That's not set up yet;
-> see the **Distribution** section in `shipping.md`.
-
-## How the backend switch works (reference)
-
-- **Frontend** (Expo has no `--mode`): `start:staging` / `start:prod` set
-  `EXPO_PUBLIC_API_URL` **inline** in the script and pass `--clear`. The `--clear` is
-  required — the URL is inlined into the JS bundle and Metro caches it, so switching
-  environments without clearing keeps hitting the old host. Plain `npm start` uses
-  `frontend/.env`, falling back to the Expo dev-server's LAN IP when the var is unset.
-- **Admin** (Vite `--mode`): `dev:staging` / `dev:prod` load `admin/.env.staging` /
-  `admin/.env.production` (committed, backend URL only — no secrets) on top of `admin/.env`
-  (gitignored, holds the Clerk key). Plain `npm run dev` uses `admin/.env` (localhost when
-  the URL is unset).
-
-The Railway side — creating the staging environment and the
-`${{Postgres.DATABASE_URL}}` / `${{Redis.REDIS_URL}}` references — is in `backend/README.md`.
+**Testing background location.** Needs a stage geofence and a set spanning now (draw both in
+the admin console), plus a lowered `SEEN_DWELL_SECONDS` so a credit lands in seconds. On the
+simulator use **Features → Location → City Run**: a *static* location produces no updates at
+all, because `distanceInterval` only fires on movement.

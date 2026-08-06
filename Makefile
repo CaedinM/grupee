@@ -1,8 +1,18 @@
-# Grupee — local dev shortcuts.
+# Grupee — dev shortcuts.
 #
 # One discoverable entrypoint tying the three packages together. Run `make` (or
 # `make help`) to list targets. Recipes call the backend venv binaries directly
 # (backend/.venv/bin/*) so no `source` is needed.
+#
+# Naming: `make <package>` runs it against your LOCAL backend, `make <package>-staging`
+# against the deployed staging backend. Targets are named for the directories
+# (backend/frontend/admin) so there's one vocabulary to remember.
+#
+# THERE IS DELIBERATELY NO -prod TARGET. The app can't reach production from a dev
+# machine at all (there is no `start:prod` script — production is TestFlight only),
+# and the admin console reaches it solely through an explicit
+# `cd admin && npm run dev:prod`, which is a real operation rather than testing.
+# Don't add prod targets here: `make` should never be one typo away from live data.
 #
 # Assumes the documented local setup: Homebrew Postgres + Redis running, a
 # backend/.venv with deps installed, and backend/.env holding CLERK_PUBLISHABLE_KEY
@@ -15,29 +25,40 @@ PSQL     = psql -d $(DB_NAME)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help backend backend-dev admin mobile migrate reset reset-user grant-admin users smoke verify
+.PHONY: help backend backend-dev frontend frontend-staging admin admin-staging \
+        migrate reset reset-user grant-admin users smoke verify
 
 help: ## List the available commands
-	@echo "Grupee local dev — make <target>"
+	@echo "Grupee — make <target>"
 	@echo
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-13s\033[0m %s\n", $$1, $$2}'
+		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-17s\033[0m %s\n", $$1, $$2}'
 	@echo
 	@echo "  reset-user / grant-admin need CLERK_ID=user_xxx (see 'make users')."
+	@echo "  No prod targets by design — production is TestFlight only, except"
+	@echo "  the admin console: cd admin && npm run dev:prod"
 
-## --- run the apps ---------------------------------------------------------
+## --- run against your local backend ---------------------------------------
 
-backend: ## Run the backend locally (real Clerk auth), reachable over Wi-Fi
+backend: ## Backend on :8000 (real Clerk auth), reachable over Wi-Fi
 	cd backend && $(UVICORN) app.main:app --reload --host 0.0.0.0
 
-backend-dev: ## Run the backend with AUTH_DEV_MODE=1 (for `make smoke`)
-	cd backend && AUTH_DEV_MODE=1 $(UVICORN) app.main:app --reload
+frontend: ## Metro for the dev client → local backend (LAN auto-detect)
+	cd frontend && npm start
 
-admin: ## Run the admin console against the local backend (http://localhost:5173)
+admin: ## Admin console on :5173 → local backend
 	cd admin && npm run dev
 
-mobile: ## Run the Expo app against the local backend (LAN auto-detect)
-	cd frontend && npm start
+## --- run against the deployed staging backend -----------------------------
+
+frontend-staging: ## Metro for the dev client → staging
+	cd frontend && npm run start:staging
+
+admin-staging: ## Admin console → staging
+	cd admin && npm run dev:staging
+
+backend-dev: ## Backend with AUTH_DEV_MODE=1 (only for `make smoke`)
+	cd backend && AUTH_DEV_MODE=1 $(UVICORN) app.main:app --reload
 
 ## --- database & first-login ----------------------------------------------
 

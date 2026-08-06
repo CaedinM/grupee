@@ -25,8 +25,8 @@ const BACKGROUND_TOKEN_REFRESH_MS = 4 * 60 * 60 * 1000;
 
 export type Permission = "asking" | "granted" | "denied";
 
-/** Background ("Always") location. `unsupported` is Expo Go, where the OS-level
- * task can't run at all; `denied` is a real refusal. Both mean the same thing
+/** Background ("Always") location. `unsupported` is a platform with no OS-level
+ * task at all — web today; `denied` is a real refusal. Both mean the same thing
  * for behavior — tracking stops when the app is minimized — but they need
  * different copy, since only one is the user's to fix. */
 export type BackgroundPermission = "asking" | "granted" | "denied" | "unsupported";
@@ -110,7 +110,7 @@ export function useLocationReporting(
       // not an error — the app keeps working exactly as it did before, just
       // without tracking once minimized — so it's reported, not thrown.
       if (!(await isBackgroundLocationAvailable())) {
-        if (!cancelled) setBackgroundPermission("unsupported"); // Expo Go
+        if (!cancelled) setBackgroundPermission("unsupported"); // web
       } else {
         const background = await Location.requestBackgroundPermissionsAsync();
         if (cancelled) return;

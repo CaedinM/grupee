@@ -115,7 +115,7 @@ Migrations run in the pre-deploy step, so they happen once per deploy rather tha
 
 Add a second Railway **environment** for testing so `smoke_test.sh` and manual clicking never touch production data. In the dashboard, environment dropdown → **+ New Environment → Duplicate** `production`, name it `staging`. Duplicating copies the services and variables but **not** database data, so staging comes up with its own empty Postgres and Redis. Because `DATABASE_URL`/`REDIS_URL` are references (`${{Postgres.DATABASE_URL}}`, `${{Redis.REDIS_URL}}`), they resolve to staging's own databases automatically — no re-wiring. Approve the staged changes to deploy; the pre-deploy `alembic upgrade head` builds staging's schema.
 
-To test against it: point the clients at the staging URL (`npm run start:staging` / `dev:staging`), or run the smoke test locally against staging's **public** DB/Redis URLs:
+To test against it: point the clients at the staging URL (`make frontend-staging` / `make admin-staging` from the repo root), or run the smoke test locally against staging's **public** DB/Redis URLs:
 
 ```bash
 export AUTH_DEV_MODE=1

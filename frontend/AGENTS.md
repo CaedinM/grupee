@@ -1,19 +1,23 @@
 # Expo HAS CHANGED
 
-Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
+Read the exact versioned docs at https://docs.expo.dev/versions/v54.0.0/ before writing any
+code — the installed SDK is **54**. Bump that URL in the same change as any SDK upgrade.
 
-This project is pinned to SDK 54 because the App Store build of Expo Go does not yet
-support SDK 57. Once Expo Go 57 ships, upgrade with `npm install expo@^57 && npx expo install --fix`
-and bump the docs URL above back to v57.0.0.
+**This project has dropped Expo Go.** Everything runs on a development build (dev client).
+Background location needs an OS-level task that Expo Go cannot run, so an Expo Go session
+would silently exercise a *materially different app* — location working there proves nothing
+about the half that matters. Don't add `--go` back to the scripts, and don't accept a bug
+report or a "works fine" from an Expo Go run.
 
-**Expo Go can no longer exercise location end to end.** Background location needs a
-development build, so the workflow is split: `npm start` (and `start:staging` / `start:prod`)
-pass `--go` and stay on Expo Go for UI work, where background tracking silently no-ops and
-the app behaves as it did before; `npm run start:dev` targets the dev client, which is the
-only way to test background location, the Always permission, or the Android foreground
-service. Build one with `eas build --profile development`. Keep the `--go` flags on the Expo
-Go scripts — installing `expo-dev-client` made dev-client mode the default, and dropping them
-silently retargets everyone's everyday workflow.
+Consequence worth knowing: the old SDK 54 pin existed **only** because App Store Expo Go
+didn't support 57. That constraint is gone — an SDK upgrade is now a normal piece of work
+(`npm install expo@^57 && npx expo install --fix`, then rebuild the dev client and bump the
+docs URL above), gated on nothing but your own testing.
+
+Build a dev client with `eas build --profile development-simulator` (simulator) or
+`--profile development` (device, needs the Apple Developer account). Rebuild it **only** when
+native config changes — `app.json`, a config plugin, or a native dependency. Pure JS/TS
+changes just need Metro, so the day-to-day loop is the same speed Expo Go was.
 
 ## Keep this file current
 
@@ -24,20 +28,23 @@ invariant, because the next agent will trust it.
 
 ## What this is
 
-The Grupee client: an Expo / React Native app for a festival friend-finder. iOS via
-Expo Go is the real target; `npm run web` (react-native-web) exists for quick UI checks and
-gets a degraded map. Backend contract and the hot paths it cares about are in
+The Grupee client: an Expo / React Native app for a festival friend-finder. iOS on a
+development build is the real target; `npm run web` (react-native-web) exists for quick UI
+checks and gets a degraded map. Backend contract and the hot paths it cares about are in
 `../backend/CLAUDE.md`; the product spec is `../spec.md`.
 
 ## Commands
 
 ```bash
-npm start          # Expo dev server; backend URL from .env (or LAN fallback)
+npm start          # Metro; loads into the dev client. Backend URL from .env (or LAN fallback)
 npm run start:staging  # …forced at the Railway staging backend (clears Metro cache)
-npm run start:prod     # …forced at the Railway production backend (clears Metro cache)
 npm run ios        # simulator
 npm run web        # browser (no real map — see the platform-split bullet)
 npx tsc --noEmit   # the only automated check in this package
+
+# dev client (only when native config changes; see the top of this file)
+npx eas build --profile development-simulator --platform ios
+tar -xzf <artifact>.tar.gz && xcrun simctl install booted Grupee.app
 ```
 
 There is no test suite, linter, or build step. `npx tsc --noEmit` is the gate — run it
@@ -45,13 +52,18 @@ before calling a change done. `.env` holds `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` a
 optional `EXPO_PUBLIC_API_URL`; Expo only reads it at start, so a key change needs a restart.
 
 **Which backend a run targets** is `EXPO_PUBLIC_API_URL`. Expo has no arbitrary `--mode`,
-so `start:staging` / `start:prod` set that var **inline** in the script (an inline env var
-wins over `.env` in Expo's loader) and pass `--clear` — required, because the URL is inlined
-into the bundle and Metro caches it, so switching environments without clearing keeps serving
-the old host. Plain `npm start` uses whatever `.env` says, and falls back to the Expo
-dev-server's LAN IP (`resolveBaseUrl` in `src/api.ts`) when the var is unset. Confirm the live
-value in the app's **Profile tab** (`ProfileScreen.tsx` renders `BASE_URL`). The full staging
-vs production story — including the parallel `admin` scripts — is in `../README.md`.
+so `start:staging` sets that var **inline** in the script (an inline env var wins over `.env`
+in Expo's loader) and passes `--clear` — required, because the URL is inlined into the bundle
+and Metro caches it, so switching environments without clearing keeps serving the old host.
+Plain `npm start` uses whatever `.env` says, and falls back to the Expo dev-server's LAN IP
+(`resolveBaseUrl` in `src/api.ts`) when the var is unset. Confirm the live value in the app's
+**Profile tab** (`ProfileScreen.tsx` renders `BASE_URL`).
+
+**There is deliberately no `start:prod`.** The dev app never points at production — that data
+is real users, and production is reached only through TestFlight / App Store builds
+(`eas build --profile production`). Don't add the script back "for debugging"; reproduce
+against staging instead. The admin console keeps its `dev:prod` because creating real
+festivals is a genuine operation. See `../README.md`.
 
 ## Architecture
 
@@ -210,7 +222,7 @@ Cross-file invariants that matter when changing things:
   the 180s heartbeat. **This socket is a foreground-only transport**: iOS suspends the JS runtime
   on minimize, so it and the heartbeat both stop dead — anything that must survive backgrounding
   belongs in the background task, not here.
-- **The background location task can reach nothing React owns — that's the whole design.** When the OS relaunches the app for a location event it starts the JS runtime, runs the task, and shuts down again with **no components mounted**. So `src/backgroundLocation.ts` can't use the socket (owned by `useLocationSocket`), `api.ts`'s `request()` (its `getToken` singleton is assigned during `Root`'s render), or any hook. `TaskManager.defineTask` therefore sits at module scope and `App.tsx` imports the file for its side effect — defining it inside a component means it wouldn't exist when the event arrives. Everything the task needs is written to SecureStore *first* by `src/backgroundSession.ts` (token, group id, user id — all three or it stands down), and it reports with a bare `fetch`. If a change makes this file import a hook or a context, it has been broken. `useLocationReporting` keeps the foreground watcher for the on-screen dot and starts/stops the task on the same `enabled` (event-live) gate, so background tracking is scoped to a live festival — which is also the App Store justification for Always permission. Denial isn't an error: `backgroundPermission` (`granted`/`denied`/`unsupported`/`asking`, surfaced in `ProfileScreen`) just means the app falls back to today's foreground-only behavior.
+- **The background location task can reach nothing React owns — that's the whole design.** When the OS relaunches the app for a location event it starts the JS runtime, runs the task, and shuts down again with **no components mounted**. So `src/backgroundLocation.ts` can't use the socket (owned by `useLocationSocket`), `api.ts`'s `request()` (its `getToken` singleton is assigned during `Root`'s render), or any hook. `TaskManager.defineTask` therefore sits at module scope and `App.tsx` imports the file for its side effect — defining it inside a component means it wouldn't exist when the event arrives. Everything the task needs is written to SecureStore *first* by `src/backgroundSession.ts` (token, group id, user id — all three or it stands down), and it reports with a bare `fetch`. If a change makes this file import a hook or a context, it has been broken. `useLocationReporting` keeps the foreground watcher for the on-screen dot and starts/stops the task on the same `enabled` (event-live) gate, so background tracking is scoped to a live festival — which is also the App Store justification for Always permission. Denial isn't an error: `backgroundPermission` (`granted`/`denied`/`unsupported`/`asking`, surfaced in `ProfileScreen`) just means the app falls back to foreground-only reporting. `unsupported` is now only web — it was also Expo Go before that was dropped — so the graceful no-op in `startBackgroundLocation` is what keeps `npm run web` working, not a legacy path to delete.
 - **The background token is not the session token.** Clerk session JWTs live 60s and refresh on a timer that only ticks while React is mounted, so a cached one is always stale by the time a task wakes. `getBackgroundToken()` mints from Clerk's `background` JWT template instead — hours long, and carrying `scope: "bg-location"` so the backend takes it on the location endpoint and 403s it everywhere else. It's re-minted every 4h while the app is open (`BACKGROUND_TOKEN_REFRESH_MS`); a phone left closed past the template lifetime stops background-reporting until it's next opened, which is an accepted limit. If the template is missing from the Clerk dashboard the mint returns null and the app stays foreground-only rather than starting a task that could only collect 401s.
 - **Poll intervals are deliberate and live next to their hook**: group members 5s, event refetch 60s,
   landmark refetch 60s and set refetch 60s (cold data — the interval is really the

@@ -42,13 +42,10 @@
     "react-dom": "19.1.0"
   },
   "scripts": {
-    "start": "expo start --offline --go",
-    "start:staging": "EXPO_PUBLIC_API_URL=https://wyat-staging.up.railway.app expo start --offline --clear --go",
-    "start:prod": "EXPO_PUBLIC_API_URL=https://wyat-production.up.railway.app expo start --offline --clear --go",
-    "start:dev": "expo start --offline",
-    "start:dev:staging": "EXPO_PUBLIC_API_URL=https://wyat-staging.up.railway.app expo start --offline --clear",
-    "android": "expo start --offline --android --go",
-    "ios": "expo start --offline --ios --go",
+    "start": "expo start --offline",
+    "start:staging": "EXPO_PUBLIC_API_URL=https://wyat-staging.up.railway.app expo start --offline --clear",
+    "android": "expo start --offline --android",
+    "ios": "expo start --offline --ios",
     "web": "expo start --offline --web"
   },
   "private": true
