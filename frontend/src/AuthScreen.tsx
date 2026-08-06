@@ -22,6 +22,21 @@ function clerkMessage(e: unknown): string {
 }
 
 /**
+ * This screen collects an identifier and a password and nothing else, so any
+ * sign-in status other than `complete` means the account carries a factor it
+ * can't satisfy — almost always MFA left enrolled on an account from before the
+ * instance switched to email codes. Clearing that is a Clerk dashboard fix
+ * (Configure → Multi-factor, then the user's own enrollment), so the copy points
+ * at the account rather than pretending a retry will help.
+ */
+const SIGN_IN_BLOCKED: Record<string, string> = {
+  needs_second_factor:
+    "This account has two-factor authentication on it, which this app can't complete. Turn it off for the account in Clerk, or sign in with a different one.",
+  needs_new_password: "This account's password has to be reset before it can sign in.",
+  needs_first_factor: "This account can't sign in with a password.",
+};
+
+/**
  * Email/password auth via Clerk. Sign-up requires verifying the address with
  * a 6-digit code Clerk emails out; once the session is active, App.tsx takes
  * over and provisions the backend profile.
@@ -60,9 +75,10 @@ export default function AuthScreen() {
       if (result.status === "complete") {
         await setActiveSignIn!({ session: result.createdSessionId });
       } else {
-        // Only possible with extra factors enabled in the Clerk dashboard,
-        // which this app doesn't use.
-        setError(`Unexpected sign-in state: ${result.status}`);
+        setError(
+          SIGN_IN_BLOCKED[result.status ?? ""] ??
+            `This account needs another sign-in step (${result.status}) that this app can't complete.`,
+        );
       }
     });
 

@@ -148,10 +148,10 @@ class GroupLocationsOut(BaseModel):
 
 LatLng = list[float]
 
-# A geofence is a polygon of 3..30 vertices (the closing edge back to the
+# A geofence is a polygon of 3..200 vertices (the closing edge back to the
 # first point is implied, not stored).
 BOUNDARY_MIN_POINTS = 3
-BOUNDARY_MAX_POINTS = 30
+BOUNDARY_MAX_POINTS = 200
 
 
 def _validate_points(points: list[LatLng]) -> list[LatLng]:

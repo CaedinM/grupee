@@ -15,7 +15,7 @@ import "leaflet/dist/leaflet.css";
 
 import { landmarkEmoji, type LatLng } from "./api";
 
-export const MAX_POINTS = 30;
+export const MAX_POINTS = 200;
 export const MIN_POINTS = 3;
 
 /** Pixel radius around the first point that counts as "clicked it" to close. */

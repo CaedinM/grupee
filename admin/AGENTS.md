@@ -93,7 +93,7 @@ Cross-file invariants that matter when changing things:
   raw datetime-local string to the API or render a raw ISO string in an input.
 - **Geometry is `[lat, lng]` everywhere**, matching the backend's boundary point
   order and Leaflet's `LatLng`. `GeofenceMap` draws boundary polygons of
-  `MIN_POINTS`(3)–`MAX_POINTS`(30) vertices for both the event boundary and
+  `MIN_POINTS`(3)–`MAX_POINTS`(200) vertices for both the event boundary and
   per-landmark geofences; landmark pins are emoji `divIcon`s keyed by kind via
   `LANDMARK_META`/`landmarkEmoji` in `api.ts`. Tiles are CARTO dark (default) or
   Esri satellite. If you touch the point model, keep event boundary and landmark
