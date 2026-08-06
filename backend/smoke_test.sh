@@ -126,5 +126,43 @@ STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/users/me/attendance")
 echo "unauthenticated attendance read -> $STATUS"
 [ "$STATUS" = "401" ]
 
+step "10. Background ingest: PUT /location with group_id fans out and counts"
+# What a minimized app does: no socket, an HTTP report carrying the group so the
+# position still reaches peers and still feeds set attendance.
+GROUP2=$(as_a -X POST "$BASE/groups" -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Background Crew\",\"event_id\":\"$EVENT_ID\"}")
+GROUP2_ID=$(echo "$GROUP2" | json "['id']")
+# Inside the fenced stage from step 9, twice, so dwell has a gap to accumulate.
+as_a -X PUT "$BASE/users/$USER_A/location" -H 'Content-Type: application/json' \
+  -d "{\"lat\":37.105,\"lng\":-122.195,\"group_id\":\"$GROUP2_ID\"}" > /dev/null
+sleep 2
+as_a -X PUT "$BASE/users/$USER_A/location" -H 'Content-Type: application/json' \
+  -d "{\"lat\":37.105,\"lng\":-122.195,\"group_id\":\"$GROUP2_ID\"}" > /dev/null
+echo "reported twice into the fenced stage over HTTP"
+# Reporting into a group you're not a member of is refused.
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/users/$USER_B/location" \
+  -H "Authorization: Bearer $TOKEN_B" -H 'Content-Type: application/json' \
+  -d "{\"lat\":37.105,\"lng\":-122.195,\"group_id\":\"$GROUP2_ID\"}")
+echo "reporting into a non-member group -> $STATUS"
+[ "$STATUS" = "403" ]
+
+step "11. A background-scoped token is good for exactly one endpoint"
+# AUTH_DEV_MODE encodes the scope as a token prefix; with real Clerk it's the
+# `scope` claim from the `background` JWT template.
+BG_TOKEN="bg-location:$TOKEN_A"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X PUT "$BASE/users/$USER_A/location" \
+  -H "Authorization: Bearer $BG_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"lat\":37.105,\"lng\":-122.195,\"group_id\":\"$GROUP2_ID\"}")
+echo "background token -> location PUT -> $STATUS"
+[ "$STATUS" = "200" ]
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/users/me" \
+  -H "Authorization: Bearer $BG_TOKEN")
+echo "background token -> GET /users/me -> $STATUS"
+[ "$STATUS" = "403" ]
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/events" \
+  -H "Authorization: Bearer $BG_TOKEN")
+echo "background token -> GET /events -> $STATUS"
+[ "$STATUS" = "403" ]
+
 echo
 echo "✅ All smoke test steps passed."

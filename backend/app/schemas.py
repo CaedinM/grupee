@@ -64,6 +64,22 @@ class LocationIn(BaseModel):
     accuracy: float | None = Field(default=None, ge=0)
 
 
+class LocationReportIn(LocationIn):
+    """Body of `PUT /users/{id}/location`.
+
+    `group_id` is what makes the HTTP path a true equal of the socket rather than
+    a degraded fallback: supplied, the report is also fanned out to that group's
+    channel and folded into the set-attendance accumulator, exactly as a `loc`
+    frame would be. Omitted, the endpoint behaves as it always has (a bare
+    position write), which is the shape `smoke_test.sh` exercises.
+
+    The socket path keeps using the bare `LocationIn` — it already knows the
+    group from the URL.
+    """
+
+    group_id: str | None = None
+
+
 class LocationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

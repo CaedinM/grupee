@@ -29,6 +29,12 @@ from .logging_config import logger
 
 AUTH_DEV_MODE = os.getenv("AUTH_DEV_MODE") == "1"
 
+# The `scope` claim on tokens minted from Clerk's `background` JWT template.
+# These are long-lived (hours, vs a session token's 60s) because a headless
+# background location task can't run Clerk's refresh loop — so they buy their
+# lifetime by being accepted on exactly one endpoint.
+BACKGROUND_SCOPE = "bg-location"
+
 
 def _resolve_issuer() -> str | None:
     explicit = os.getenv("CLERK_ISSUER")
@@ -74,14 +80,41 @@ _bearer = HTTPBearer(auto_error=False)
 def verify_clerk_token(token: str) -> str:
     """Verify a raw Clerk session JWT and return its `sub` (the Clerk user id).
 
+    Rejects a background-scoped token (see `verify_clerk_token_scoped`), so every
+    existing caller is closed to them by default rather than by remembering to
+    check. Raises HTTPException on any failure so all callers get a consistent
+    status code.
+    """
+    clerk_id, scope = verify_clerk_token_scoped(token)
+    if scope is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This token is only valid for background location reports",
+        )
+    return clerk_id
+
+
+def verify_clerk_token_scoped(token: str) -> tuple[str, str | None]:
+    """Verify a raw Clerk JWT and return `(sub, scope)`.
+
     The transport-agnostic core of auth: `get_clerk_id` wraps it for HTTP
     (pulling the token from the Authorization header), and the WebSocket path
-    calls it directly with the token from the query string, since a socket
-    upgrade can't carry an `Authorization` header through React Native. Raises
-    HTTPException on any failure so both callers get a consistent status code.
+    calls `verify_clerk_token` directly with the token from the query string,
+    since a socket upgrade can't carry an `Authorization` header through React
+    Native.
+
+    `scope` is None for an ordinary session token. It is `BACKGROUND_SCOPE` for
+    one minted from the `background` JWT template, which the app caches on disk
+    so a headless location task can report without React (and therefore without
+    Clerk's 60s refresh loop). Those live for hours instead of a minute, so they
+    are deliberately good for one thing only — see `get_location_writer`.
     """
     if AUTH_DEV_MODE:
-        return token
+        # Dev tokens carry the scope as a prefix so smoke tests can exercise
+        # both paths without a Clerk instance.
+        if token.startswith(f"{BACKGROUND_SCOPE}:"):
+            return token.removeprefix(f"{BACKGROUND_SCOPE}:"), BACKGROUND_SCOPE
+        return token, None
     if CLERK_ISSUER is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -103,7 +136,10 @@ def verify_clerk_token(token: str) -> str:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {e}"
         )
-    return payload["sub"]
+    # An ordinary session token carries no `scope` claim at all. Anything that
+    # does is restricted, and an *unrecognized* scope stays restricted — failing
+    # closed, so a future template can't accidentally mint full-access tokens.
+    return payload["sub"], payload.get("scope")
 
 
 def get_clerk_id(
@@ -125,6 +161,37 @@ def get_current_user(
     clerk_id: str = Depends(get_clerk_id), db: Session = Depends(get_db)
 ) -> models.User:
     """The signed-in user's local row; 404 until POST /users has provisioned it."""
+    user = db.execute(
+        select(models.User).where(models.User.clerk_id == clerk_id)
+    ).scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No profile for this account yet — POST /users to create one",
+        )
+    return user
+
+
+def get_location_writer(
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: Session = Depends(get_db),
+) -> models.User:
+    """The signed-in user, for the location-report endpoint only.
+
+    The one dependency that accepts a background-scoped token alongside a normal
+    session token — a minimized app reporting its position is exactly what those
+    are for. Everything else in the API goes through `get_clerk_id` /
+    `get_current_user`, which reject them.
+    """
+    if creds is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token"
+        )
+    clerk_id, scope = verify_clerk_token_scoped(creds.credentials)
+    if scope is not None and scope != BACKGROUND_SCOPE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Token scope not accepted here"
+        )
     user = db.execute(
         select(models.User).where(models.User.clerk_id == clerk_id)
     ).scalar_one_or_none()

@@ -149,6 +149,32 @@ The clients bake in **one backend URL per run**, chosen by which command you use
 
 Confirm the live target any time in the app's **Profile tab** (it prints the base URL).
 
+### Expo Go vs. a development build
+
+Location now has two modes, and only one of them works in Expo Go:
+
+| | Expo Go (`npm start`) | Dev build (`npm run start:dev`) |
+|---|---|---|
+| UI, groups, map, events | ✅ | ✅ |
+| Live location while the app is **open** | ✅ | ✅ |
+| Location while **minimized** | ❌ silently off | ✅ |
+| "Always" permission, Android foreground service | ❌ | ✅ |
+
+Expo Go can't run an OS-level background task, so `npm start` passes `--go` and the app just
+behaves as it always did — fine for everyday UI work. To test background tracking or set
+attendance for real, build a dev client once and use `npm run start:dev`:
+
+```bash
+cd frontend
+npx eas build --profile development --platform ios   # once; install the result on the device
+npm run start:dev
+```
+
+Background reports also need a **Clerk JWT template** named `background` (Dashboard → JWT
+Templates): lifetime `43200` seconds, custom claim `{"scope": "bg-location"}`. Without it the
+app stays foreground-only rather than failing — `getBackgroundToken()` returns null and
+`ProfileScreen` shows background sharing as unavailable.
+
 ## Local dev — everything on your machine, in Expo Go
 
 Postgres and Redis are already running (they auto-start at login — check with

@@ -1,0 +1,19 @@
+# Files kept out of the EAS Build upload.
+#
+# EAS falls back to .gitignore when this file is absent — but only the one in
+# this directory, not the repo root's, which is where the .env rules live. That
+# gap uploaded frontend/.env on an EAS_NO_VCS build. Spelled out here so the
+# exclusion holds no matter which mode a build runs in.
+.env
+.env.*
+!.env.example
+
+# Generated natively by prebuild on the builder; uploading a local copy only
+# risks it going stale against app.json.
+/ios
+/android
+
+node_modules/
+.expo/
+dist/
+web-build/

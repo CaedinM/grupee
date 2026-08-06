@@ -6,6 +6,15 @@ This project is pinned to SDK 54 because the App Store build of Expo Go does not
 support SDK 57. Once Expo Go 57 ships, upgrade with `npm install expo@^57 && npx expo install --fix`
 and bump the docs URL above back to v57.0.0.
 
+**Expo Go can no longer exercise location end to end.** Background location needs a
+development build, so the workflow is split: `npm start` (and `start:staging` / `start:prod`)
+pass `--go` and stay on Expo Go for UI work, where background tracking silently no-ops and
+the app behaves as it did before; `npm run start:dev` targets the dev client, which is the
+only way to test background location, the Always permission, or the Android foreground
+service. Build one with `eas build --profile development`. Keep the `--go` flags on the Expo
+Go scripts — installing `expo-dev-client` made dev-client mode the default, and dropping them
+silently retargets everyone's everyday workflow.
+
 ## Keep this file current
 
 When a change alters something described here — the state that lives in `App.tsx`, the
@@ -195,8 +204,14 @@ Cross-file invariants that matter when changing things:
   so `lastAck`/`sentCount` are synthesized locally, and the socket patches the self entry in
   `members` on each send. The socket reconnects with exponential backoff on transient drops but
   stops on terminal close codes (4403 not-a-member, 4404 no-group, 4409 event-ended). The backend's
-  `PUT /users/{id}/location` and `GET /groups/{id}/locations` still exist as a fallback but the app
-  doesn't call them. Keep `LOCATION_TTL_SECONDS` (backend, 210s) > the 180s heartbeat.
+  `GET /groups/{id}/locations` still exists as a fallback the app doesn't call, but
+  `PUT /users/{id}/location` is no longer dead — it's the ingest for the background task (next
+  bullet), which is why it now takes a `group_id`. Keep `LOCATION_TTL_SECONDS` (backend, 210s) >
+  the 180s heartbeat. **This socket is a foreground-only transport**: iOS suspends the JS runtime
+  on minimize, so it and the heartbeat both stop dead — anything that must survive backgrounding
+  belongs in the background task, not here.
+- **The background location task can reach nothing React owns — that's the whole design.** When the OS relaunches the app for a location event it starts the JS runtime, runs the task, and shuts down again with **no components mounted**. So `src/backgroundLocation.ts` can't use the socket (owned by `useLocationSocket`), `api.ts`'s `request()` (its `getToken` singleton is assigned during `Root`'s render), or any hook. `TaskManager.defineTask` therefore sits at module scope and `App.tsx` imports the file for its side effect — defining it inside a component means it wouldn't exist when the event arrives. Everything the task needs is written to SecureStore *first* by `src/backgroundSession.ts` (token, group id, user id — all three or it stands down), and it reports with a bare `fetch`. If a change makes this file import a hook or a context, it has been broken. `useLocationReporting` keeps the foreground watcher for the on-screen dot and starts/stops the task on the same `enabled` (event-live) gate, so background tracking is scoped to a live festival — which is also the App Store justification for Always permission. Denial isn't an error: `backgroundPermission` (`granted`/`denied`/`unsupported`/`asking`, surfaced in `ProfileScreen`) just means the app falls back to today's foreground-only behavior.
+- **The background token is not the session token.** Clerk session JWTs live 60s and refresh on a timer that only ticks while React is mounted, so a cached one is always stale by the time a task wakes. `getBackgroundToken()` mints from Clerk's `background` JWT template instead — hours long, and carrying `scope: "bg-location"` so the backend takes it on the location endpoint and 403s it everywhere else. It's re-minted every 4h while the app is open (`BACKGROUND_TOKEN_REFRESH_MS`); a phone left closed past the template lifetime stops background-reporting until it's next opened, which is an accepted limit. If the template is missing from the Clerk dashboard the mint returns null and the app stays foreground-only rather than starting a task that could only collect 401s.
 - **Poll intervals are deliberate and live next to their hook**: group members 5s, event refetch 60s,
   landmark refetch 60s and set refetch 60s (cold data — the interval is really the
   error-retry loop), liveness re-evaluation tick 30s. Polling loops guard with an `inFlight` flag and a

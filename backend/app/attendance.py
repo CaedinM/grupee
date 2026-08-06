@@ -149,14 +149,104 @@ def _load_event_geo(event_id: str) -> _EventGeo:
     )
 
 
-async def _event_geo(event_id: str) -> _EventGeo:
+def _cached_geo(event_id: str) -> _EventGeo | None:
+    """The cached geo if it's still fresh, else None."""
     cached = _geo_cache.get(event_id)
-    loaded_at = time.monotonic()
-    if cached is not None and loaded_at - cached[0] < EVENT_GEO_TTL_SECONDS:
+    if cached is not None and time.monotonic() - cached[0] < EVENT_GEO_TTL_SECONDS:
         return cached[1]
-    geo = await run_in_threadpool(_load_event_geo, event_id)
-    _geo_cache[event_id] = (loaded_at, geo)
+    return None
+
+
+async def _event_geo(event_id: str) -> _EventGeo:
+    """Async path (WebSocket): the load goes to a threadpool."""
+    geo = _cached_geo(event_id)
+    if geo is None:
+        geo = await run_in_threadpool(_load_event_geo, event_id)
+        _geo_cache[event_id] = (time.monotonic(), geo)
     return geo
+
+
+def _event_geo_sync(event_id: str) -> _EventGeo:
+    """Sync path (HTTP ingest), already off the event loop in FastAPI's
+    threadpool. Shares the cache with the async twin, so a socket ping warms it
+    for a background HTTP report and vice versa."""
+    geo = _cached_geo(event_id)
+    if geo is None:
+        geo = _load_event_geo(event_id)
+        _geo_cache[event_id] = (time.monotonic(), geo)
+    return geo
+
+
+def _live_set_at(geo: _EventGeo, lat: float, lng: float, now: datetime) -> str | None:
+    """The set playing at whichever stage this position falls inside, if any."""
+    stage_id = geo.stage_at(lat, lng)
+    return geo.live_set(stage_id, now) if stage_id is not None else None
+
+
+@dataclass(frozen=True)
+class _Credit:
+    """A set the caller has now earned. Returned by `_advance` rather than
+    written there, so the decision stays free of I/O."""
+
+    first_seen_at: datetime
+    dwell_seconds: int
+
+
+def _advance(
+    state: dict | None, set_id: str | None, now: float
+) -> tuple[dict | None, _Credit | None]:
+    """The dwell rules, as a pure function — no Redis, no database, no clock.
+
+    Returns `(state_to_write, credit_to_record)`. A `None` state means nothing
+    changed and the caller should skip the write entirely (the common case for
+    someone wandering the field). A `_Credit` means the threshold was crossed on
+    this position and the row hasn't been written yet.
+
+    Both transports call this: the WebSocket path through `on_position` and the
+    HTTP path through `on_position_sync`. Keeping it one function is what stops
+    the two from drifting apart on a rule as fiddly as the gap handling — and it
+    means the rules can be exercised directly, without a server or a socket.
+    """
+    # Outside every stage, or standing at one with nothing playing. Close the
+    # segment so the time until they come back isn't credited — but if there was
+    # no open segment, there is nothing to write.
+    if set_id is None:
+        if state is not None and state.get("inside"):
+            return {**state, "inside": False}, None
+        return None, None
+
+    # First sighting, or a different set than we were tracking (a changeover
+    # deliberately forfeits partial dwell on both acts).
+    if state is None or state.get("set_id") != set_id:
+        return {
+            "set_id": set_id,
+            "dwell": 0.0,
+            "last_seen": now,
+            "first_seen": now,
+            "inside": True,
+            "credited": False,
+        }, None
+
+    # Back inside after leaving: resume from now, crediting none of the gap.
+    if not state.get("inside"):
+        return {**state, "inside": True, "last_seen": now}, None
+
+    dwell = float(state.get("dwell") or 0.0)
+    gap = now - float(state.get("last_seen") or now)
+    if 0 < gap <= MAX_PING_GAP_SECONDS:
+        dwell += gap
+    new_state = {**state, "dwell": dwell, "last_seen": now}
+
+    if state.get("credited") or dwell < SEEN_DWELL_SECONDS:
+        return new_state, None
+
+    new_state["credited"] = True
+    return new_state, _Credit(
+        first_seen_at=datetime.fromtimestamp(
+            float(state.get("first_seen") or now), timezone.utc
+        ),
+        dwell_seconds=int(dwell),
+    )
 
 
 def _record_attendance(
@@ -192,9 +282,14 @@ def _record_attendance(
         db.close()
 
 
+def _should_track(geo: _EventGeo) -> bool:
+    """An event with no fenced stages or no schedule has nothing to be seen."""
+    return bool(geo.stages and geo.slots)
+
+
 async def on_position(event_id: str | None, user_id: str, lat: float, lng: float) -> None:
-    """Fold one position into the user's dwell state, crediting a set if the
-    threshold is crossed. The only entry point; called per `loc` frame.
+    """Fold one position into the user's dwell state — the WebSocket path,
+    called per `loc` frame.
 
     Costs one Redis GET in the common case (wandering the field, no state), plus
     one SET when the state actually changes. The containment test is pure Python
@@ -203,62 +298,50 @@ async def on_position(event_id: str | None, user_id: str, lat: float, lng: float
     if event_id is None:
         return  # a group with no event has no stages and no schedule
     geo = await _event_geo(event_id)
-    if not geo.stages or not geo.slots:
-        return  # nothing here to be seen
+    if not _should_track(geo):
+        return
 
-    now_dt = datetime.now(timezone.utc)
-    now = now_dt.timestamp()
-    stage_id = geo.stage_at(lat, lng)
-    set_id = geo.live_set(stage_id, now_dt) if stage_id is not None else None
-
+    now = datetime.now(timezone.utc)
+    set_id = _live_set_at(geo, lat, lng, now)
     state = await redis_client.aread_dwell(user_id)
+    new_state, credit = _advance(state, set_id, now.timestamp())
 
-    # Outside every stage, or standing at one with nothing playing. Mark the
-    # segment closed so the time until they come back isn't credited — and write
-    # nothing at all if there was no state to close.
-    if set_id is None:
-        if state is not None and state.get("inside"):
-            state["inside"] = False
-            await redis_client.awrite_dwell(user_id, state)
-        return
-
-    # First sighting, or a different set than we were tracking (a changeover
-    # deliberately forfeits partial dwell on both acts).
-    if state is None or state.get("set_id") != set_id:
-        await redis_client.awrite_dwell(
-            user_id,
-            {
-                "set_id": set_id,
-                "dwell": 0.0,
-                "last_seen": now,
-                "first_seen": now,
-                "inside": True,
-                "credited": False,
-            },
-        )
-        return
-
-    # Back inside after leaving: resume from now, crediting none of the gap.
-    if not state.get("inside"):
-        state["inside"] = True
-        state["last_seen"] = now
-        await redis_client.awrite_dwell(user_id, state)
-        return
-
-    dwell = float(state.get("dwell") or 0.0)
-    gap = now - float(state.get("last_seen") or now)
-    if 0 < gap <= MAX_PING_GAP_SECONDS:
-        dwell += gap
-    state["dwell"] = dwell
-    state["last_seen"] = now
-
-    if not state.get("credited") and dwell >= SEEN_DWELL_SECONDS:
-        first_seen_at = datetime.fromtimestamp(
-            float(state.get("first_seen") or now), timezone.utc
-        )
+    if credit is not None:
         await run_in_threadpool(
-            _record_attendance, user_id, event_id, set_id, first_seen_at, int(dwell)
+            _record_attendance,
+            user_id,
+            event_id,
+            set_id,
+            credit.first_seen_at,
+            credit.dwell_seconds,
         )
-        state["credited"] = True
+    if new_state is not None:
+        await redis_client.awrite_dwell(user_id, new_state)
 
-    await redis_client.awrite_dwell(user_id, state)
+
+def on_position_sync(event_id: str | None, user_id: str, lat: float, lng: float) -> None:
+    """Fold one position into the user's dwell state — the HTTP path, used by
+    background reports from a minimized app (`PUT /users/{id}/location` with a
+    `group_id`).
+
+    The same rules as `on_position`, via the same `_advance`; only the I/O is
+    synchronous. FastAPI already runs sync routes in a threadpool, so blocking
+    here doesn't touch the event loop.
+    """
+    if event_id is None:
+        return
+    geo = _event_geo_sync(event_id)
+    if not _should_track(geo):
+        return
+
+    now = datetime.now(timezone.utc)
+    set_id = _live_set_at(geo, lat, lng, now)
+    state = redis_client.read_dwell(user_id)
+    new_state, credit = _advance(state, set_id, now.timestamp())
+
+    if credit is not None:
+        _record_attendance(
+            user_id, event_id, set_id, credit.first_seen_at, credit.dwell_seconds
+        )
+    if new_state is not None:
+        redis_client.write_dwell(user_id, new_state)

@@ -33,11 +33,32 @@ export async function getAuthToken(): Promise<string | null> {
 // call hooks — so the app registers useAuth().getToken here once signed in.
 // Clerk caches the ~60s session JWT internally and refreshes it just before
 // expiry, so calling this on every request is cheap.
-type TokenGetter = () => Promise<string | null>;
+type TokenGetter = (options?: { template?: string }) => Promise<string | null>;
 let getToken: TokenGetter | null = null;
 
 export function setTokenGetter(getter: TokenGetter | null) {
   getToken = getter;
+}
+
+// Clerk JWT template minting a long-lived, narrowly-scoped token. Configured in
+// the Clerk dashboard with `{"scope": "bg-location"}` and a lifetime of hours.
+export const BACKGROUND_TOKEN_TEMPLATE = "background";
+
+/** A token the headless background location task can use.
+ *
+ * The ordinary session JWT is useless there: it expires in 60s and Clerk's
+ * refresh loop only runs while React is mounted, so anything cached to disk is
+ * stale before the task next wakes. This one lasts hours, and the backend
+ * accepts it on the location endpoint alone (403 everywhere else), which is what
+ * makes it safe to leave sitting in SecureStore. Null when signed out, or when
+ * the template hasn't been created in the Clerk dashboard yet. */
+export async function getBackgroundToken(): Promise<string | null> {
+  if (!getToken) return null;
+  try {
+    return await getToken({ template: BACKGROUND_TOKEN_TEMPLATE });
+  } catch {
+    return null; // template missing/misconfigured — caller falls back to foreground-only
+  }
 }
 
 async function authHeader(): Promise<Record<string, string>> {

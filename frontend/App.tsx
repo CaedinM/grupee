@@ -33,6 +33,11 @@ import { color, font, radius, space, type } from "./src/ui/theme";
 import { useEventLiveness } from "./src/useEventLiveness";
 import { useLocationReporting } from "./src/useLocationReporting";
 import { useLocationSocket } from "./src/useLocationSocket";
+// Side-effect import: registers the background location task. It MUST be at
+// module scope — when the OS relaunches the app in the background there is no
+// React, so a task defined inside a component would never exist to receive the
+// location event.
+import "./src/backgroundLocation";
 
 const PUBLISHABLE_KEY = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -177,7 +182,14 @@ function SignedInApp({
   // Reporting lives here, not in a screen, so location keeps streaming no matter
   // which tab is open. It owns GPS acquisition (10m movement filter + heartbeat)
   // and pushes each fix up the socket.
-  const reporting = useLocationReporting(user.id, live, socket.send);
+  // It also arms the OS-level background task, so a pocketed phone keeps
+  // reporting (over HTTP) once the JS runtime is suspended and the socket dies.
+  const reporting = useLocationReporting(
+    user.id,
+    live ? (activeGroup?.id ?? null) : null,
+    live,
+    socket.send
+  );
 
   // All screens stay mounted (hidden, not unmounted) so the map keeps its
   // camera position across tab switches.

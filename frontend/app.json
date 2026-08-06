@@ -35,7 +35,11 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Grupee shares your live location with your crew during the festival."
+          "locationWhenInUsePermission": "Grupee shares your live location with your crew during the festival.",
+          "locationAlwaysAndWhenInUsePermission": "Grupee keeps sharing your location with your crew while your phone is in your pocket, so they can still find you during the festival.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

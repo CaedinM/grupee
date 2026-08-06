@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFil
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .. import models, redis_client, schemas
-from ..auth import get_clerk_id, get_current_user, require_self
+from .. import attendance, models, redis_client, schemas
+from ..auth import get_clerk_id, get_current_user, get_location_writer, require_self
 from ..database import get_db
+from ..logging_config import logger
 from ..storage import storage
 
 router = APIRouter(tags=["users"])
@@ -162,13 +163,20 @@ def delete_avatar(
     db.commit()
 
 
-# 🔥 hot path: called every ~1.5s per client. The position never touches the
-# main database — it's written to Redis with a staleness TTL (see redis_client).
+# 🔥 hot path. The position never touches the main database — it's written to
+# Redis with a staleness TTL (see redis_client).
+#
+# This is also the ingest for a *backgrounded* app: a headless location task has
+# no React, so it can reach neither the WebSocket nor Clerk's refresh loop, and
+# reports over HTTP with a background-scoped token instead. Passing `group_id`
+# makes that report equivalent to a socket frame — fanned out to peers and folded
+# into set attendance — so the two transports can't drift apart.
 @router.put("/users/{user_id}/location", response_model=schemas.LocationOut)
 def upsert_location(
     user_id: str,
-    body: schemas.LocationIn,
-    user: models.User = Depends(get_current_user),
+    body: schemas.LocationReportIn,
+    user: models.User = Depends(get_location_writer),
+    db: Session = Depends(get_db),
 ):
     require_self(user, user_id)
     payload = redis_client.write_location(
@@ -179,6 +187,49 @@ def upsert_location(
         battery=body.battery,
         accuracy=body.accuracy,
     )
+
+    if body.group_id is not None:
+        membership = db.execute(
+            select(models.Membership).where(
+                models.Membership.group_id == body.group_id,
+                models.Membership.user_id == user_id,
+            )
+        ).scalar_one_or_none()
+        if membership is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You are not a member of this group",
+            )
+        group = db.get(models.Group, body.group_id)
+
+        # Peers' maps update from the same channel the socket publishes to, so a
+        # member whose phone is in their pocket keeps moving on everyone's map.
+        redis_client.publish_group_sync(
+            body.group_id,
+            {
+                "type": "update",
+                "user_id": user_id,
+                # No socket, so no connection id — peers only use `conn` to
+                # discard a stale `leave`, and an HTTP report never sends one.
+                "conn": None,
+                "member": {
+                    "user_id": user_id,
+                    "display_name": user.display_name,
+                    "avatar_url": user.avatar_url,
+                    "role": membership.role,
+                    "location": payload,
+                },
+            },
+        )
+
+        # Never let attendance break a position report — same rule as the socket.
+        try:
+            attendance.on_position_sync(
+                group.event_id if group else None, user_id, body.lat, body.lng
+            )
+        except Exception:
+            logger.exception("Attendance update failed for user %s", user_id)
+
     return schemas.LocationOut(user_id=user_id, **payload)
 
 

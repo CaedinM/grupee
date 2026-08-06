@@ -149,6 +149,34 @@ def delete_location(user_id: str) -> None:
     client.delete(_key(user_id))
 
 
+def _decode_dwell(raw: str | None) -> dict | None:
+    """Shared by both dwell readers. A corrupt value reads as None so the
+    accumulator just starts over rather than failing the position report."""
+    if raw is None:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+def read_dwell(user_id: str) -> dict | None:
+    """Sync twin of aread_dwell, for the HTTP ingest path."""
+    return _decode_dwell(client.get(_dwell_key(user_id)))
+
+
+def write_dwell(user_id: str, state: dict) -> None:
+    """Sync twin of awrite_dwell — same key and TTL."""
+    client.set(_dwell_key(user_id), json.dumps(state), ex=DWELL_STATE_TTL_SECONDS)
+
+
+def publish_group_sync(group_id: str, message: dict) -> None:
+    """Sync twin of publish_group. A position that arrives over HTTP (a
+    backgrounded app reporting without a socket) still has to reach every peer's
+    map, and the fan-out backplane is the same channel either way."""
+    client.publish(channel(group_id), json.dumps(message))
+
+
 # ---------- Async path (WebSocket transport) ----------
 
 async def awrite_location(user_id: str, lat: float, lng: float, heading: float | None,
@@ -179,15 +207,8 @@ async def publish_group(group_id: str, message: dict) -> None:
 
 async def aread_dwell(user_id: str) -> dict | None:
     """This user's set-attendance dwell state, or None if they aren't currently
-    accumulating any. A corrupt value reads as None so the accumulator just
-    starts over rather than failing the ping."""
-    raw = await async_client().get(_dwell_key(user_id))
-    if raw is None:
-        return None
-    try:
-        return json.loads(raw)
-    except ValueError:
-        return None
+    accumulating any."""
+    return _decode_dwell(await async_client().get(_dwell_key(user_id)))
 
 
 async def awrite_dwell(user_id: str, state: dict) -> None:

@@ -194,6 +194,24 @@ function SettingsScreen({
             }
           />
           <Divider />
+          {/* Worth its own row: with this off, the crew loses you the moment the
+              phone goes in a pocket, and sets you watched aren't counted. */}
+          <Row
+            label="In the background"
+            value={
+              reporting.backgroundPermission === "granted"
+                ? "On"
+                : reporting.backgroundPermission === "asking"
+                  ? "Waiting…"
+                  : reporting.backgroundPermission === "unsupported"
+                    ? "Needs the full app"
+                    : "Off — set Location to Always"
+            }
+            tone={
+              reporting.backgroundPermission === "granted" ? color.teal : color.textDim
+            }
+          />
+          <Divider />
           <Row label="Updates sent" value={String(reporting.sentCount)} mono />
         </GlassCard>
       </Reveal>
