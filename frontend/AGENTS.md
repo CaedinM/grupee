@@ -65,6 +65,17 @@ is real users, and production is reached only through TestFlight / App Store bui
 against staging instead. The admin console keeps its `dev:prod` because creating real
 festivals is a genuine operation. See `../README.md`.
 
+**Adding a dependency must preserve the EAS lockfile.** EAS builds on Node 20 / npm 10, while
+this machine runs Node 24 / npm 11. npm 11 can write a lockfile npm 10 rejects, making EAS fail
+at "Install dependencies" even though `npm ci` passes locally. Verify a changed lockfile with
+`npx npm@10 ci` in a scratch copy of `package.json` and `package-lock.json`; if it fails,
+regenerate it with `npx npm@10 install --package-lock-only`.
+
+**Testing background location needs a moving simulator.** Create a stage geofence and a set
+whose time range includes now in the admin console, then lower `SEEN_DWELL_SECONDS` so an
+attendance credit lands in seconds. In the simulator, use **Features → Location → City Run**:
+a static location sends no updates because `distanceInterval` only fires on movement.
+
 ## Architecture
 
 `App.tsx` is the whole shell — there is no navigation library. It nests

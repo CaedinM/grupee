@@ -142,23 +142,3 @@ script, and users get the app through TestFlight (`eas build --profile productio
 Auth is real Clerk everywhere. Signing in against an empty DB drops you on the name screen and
 provisions your user — so `make reset` is also how you re-test the first-login flow. Confirm
 which backend a client is hitting in the app's **Profile tab** (it prints the URL).
-
----
-
-# Reference
-
-**Choosing a backend.** `start:staging` sets `EXPO_PUBLIC_API_URL` inline and passes `--clear`
-— required, because the URL is baked into the JS bundle and Metro caches it. The admin's
-`dev:staging` loads the committed `admin/.env.staging`. Plain `npm start` / `npm run dev` use
-your local backend. Railway setup lives in `backend/README.md`.
-
-**Adding a frontend dependency.** EAS builds on Node 20 / npm 10; this machine runs Node 24 /
-npm 11, and npm 11 can write a lockfile npm 10 rejects — the build then fails in "Install
-dependencies" while `npm ci` passes locally. Verify with `npx npm@10 ci` in a scratch copy of
-`package.json` + `package-lock.json`, and regenerate with
-`npx npm@10 install --package-lock-only` if it fails.
-
-**Testing background location.** Needs a stage geofence and a set spanning now (draw both in
-the admin console), plus a lowered `SEEN_DWELL_SECONDS` so a credit lands in seconds. On the
-simulator use **Features → Location → City Run**: a *static* location produces no updates at
-all, because `distanceInterval` only fires on movement.
