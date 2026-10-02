@@ -12,7 +12,7 @@ import {
 import { GlassButton, GlassSurface, Reveal } from "./ui/Glass";
 import { color, font, radius, space, type } from "./ui/theme";
 
-type Mode = "signIn" | "signUp" | "verify";
+type Mode = "signIn" | "signUp" | "verify" | "secondFactor";
 
 /** Clerk errors carry a structured list; surface the human-readable one. */
 function clerkMessage(e: unknown): string {
@@ -21,17 +21,7 @@ function clerkMessage(e: unknown): string {
   return first?.longMessage ?? first?.message ?? (e instanceof Error ? e.message : String(e));
 }
 
-/**
- * This screen collects an identifier and a password and nothing else, so any
- * sign-in status other than `complete` means the account carries a factor it
- * can't satisfy — almost always MFA left enrolled on an account from before the
- * instance switched to email codes. Clearing that is a Clerk dashboard fix
- * (Configure → Multi-factor, then the user's own enrollment), so the copy points
- * at the account rather than pretending a retry will help.
- */
 const SIGN_IN_BLOCKED: Record<string, string> = {
-  needs_second_factor:
-    "This account has two-factor authentication on it, which this app can't complete. Turn it off for the account in Clerk, or sign in with a different one.",
   needs_new_password: "This account's password has to be reset before it can sign in.",
   needs_first_factor: "This account can't sign in with a password.",
 };
@@ -49,6 +39,7 @@ export default function AuthScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
+  const [secondFactorEmailId, setSecondFactorEmailId] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,12 +65,48 @@ export default function AuthScreen() {
       const result = await signIn!.create({ identifier: email.trim(), password });
       if (result.status === "complete") {
         await setActiveSignIn!({ session: result.createdSessionId });
+      } else if (result.status === "needs_second_factor") {
+        const emailFactor = result.supportedSecondFactors?.find(
+          (factor) => factor.strategy === "email_code",
+        );
+        if (!emailFactor || emailFactor.strategy !== "email_code") {
+          setError("This account requires a second-factor method Grupee does not support.");
+          return;
+        }
+        await result.prepareSecondFactor({
+          strategy: "email_code",
+          emailAddressId: emailFactor.emailAddressId,
+        });
+        setSecondFactorEmailId(emailFactor.emailAddressId);
+        setCode("");
+        setMode("secondFactor");
       } else {
         setError(
           SIGN_IN_BLOCKED[result.status ?? ""] ??
             `This account needs another sign-in step (${result.status}) that this app can't complete.`,
         );
       }
+    });
+
+  const submitSecondFactor = () =>
+    run(async () => {
+      const result = await signIn!.attemptSecondFactor({
+        strategy: "email_code",
+        code: code.trim(),
+      });
+      if (result.status === "complete") {
+        await setActiveSignIn!({ session: result.createdSessionId });
+      } else {
+        setError(`Couldn't verify that code (${result.status}). Request a new code and try again.`);
+      }
+    });
+
+  const resendSecondFactor = () =>
+    run(async () => {
+      await signIn!.prepareSecondFactor({
+        strategy: "email_code",
+        emailAddressId: secondFactorEmailId,
+      });
     });
 
   const submitSignUp = () =>
@@ -103,6 +130,61 @@ export default function AuthScreen() {
     run(async () => {
       await signUp!.prepareEmailAddressVerification({ strategy: "email_code" });
     });
+
+  if (mode === "secondFactor") {
+    return (
+      <View style={styles.card}>
+        <Reveal>
+          <Text style={styles.eyebrow}>Two-step verification</Text>
+          <Text style={type.hero}>Check your email</Text>
+          <Text style={[type.subtitle, styles.lede]}>
+            Enter the 6-digit code Clerk sent to {email.trim()}.
+          </Text>
+        </Reveal>
+
+        <Reveal delay={90} style={styles.block}>
+          <GlassSurface r={radius.lg} sunken>
+            <TextInput
+              style={[styles.input, styles.codeInput]}
+              placeholder="000000"
+              placeholderTextColor="rgba(255,255,255,0.13)"
+              value={code}
+              onChangeText={setCode}
+              keyboardType="number-pad"
+              textContentType="oneTimeCode"
+              maxLength={6}
+              autoFocus
+              onSubmitEditing={submitSecondFactor}
+            />
+          </GlassSurface>
+          <GlassButton
+            label="Verify"
+            onPress={submitSecondFactor}
+            disabled={code.trim().length !== 6 || busy}
+            busy={busy ? <ActivityIndicator color="#fff" /> : undefined}
+          />
+          {error && <Text style={styles.error}>{error}</Text>}
+        </Reveal>
+
+        <Reveal delay={160} style={styles.links}>
+          <Pressable onPress={resendSecondFactor} disabled={busy} hitSlop={8}>
+            <Text style={styles.link}>Resend code</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setMode("signIn");
+              setCode("");
+              setError(null);
+            }}
+            disabled={busy}
+            hitSlop={8}
+          >
+            <Text style={styles.link}>Back</Text>
+          </Pressable>
+        </Reveal>
+      </View>
+    );
+  }
 
   if (mode === "verify") {
     return (
