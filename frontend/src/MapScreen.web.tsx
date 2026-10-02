@@ -1,5 +1,5 @@
-// react-native-maps has no web support, so web gets the raw telemetry view
-// instead of a map. Real map testing happens in Expo Go.
+// The user-facing map is a native Mapbox experience. Web intentionally keeps
+// this telemetry view instead of shipping a different map implementation.
 import { Ionicons } from "@expo/vector-icons";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -72,8 +72,8 @@ export default function MapScreen({
         <Text style={styles.eyebrow}>Web preview</Text>
         <Text style={typeScale.hero}>Hey, {user.display_name}</Text>
         <Text style={[styles.subtitle, { marginTop: space.sm }]}>
-          The map view is native-only — open the app in Expo Go to see it. Location telemetry still
-          runs here:
+          The map view is native-only — open the app in a development build to see it. Location
+          telemetry still runs here:
         </Text>
       </Reveal>
 

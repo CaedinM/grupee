@@ -9,6 +9,9 @@ would silently exercise a *materially different app* — location working there 
 about the half that matters. Don't add `--go` back to the scripts, and don't accept a bug
 report or a "works fine" from an Expo Go run.
 
+Before local setup, device builds, staging work, or production deployment, read
+[`../SETUP.md`](../SETUP.md). It is the operational source of truth.
+
 Consequence worth knowing: the old SDK 54 pin existed **only** because App Store Expo Go
 didn't support 57. That constraint is gone — an SDK upgrade is now a normal piece of work
 (`npm install expo@^57 && npx expo install --fix`, then rebuild the dev client and bump the
@@ -63,7 +66,7 @@ Plain `npm start` uses whatever `.env` says, and falls back to the Expo dev-serv
 is real users, and production is reached only through TestFlight / App Store builds
 (`eas build --profile production`). Don't add the script back "for debugging"; reproduce
 against staging instead. The admin console keeps its `dev:prod` because creating real
-festivals is a genuine operation. See `../README.md`.
+festivals is a genuine operation. See `../SETUP.md`.
 
 **Adding a dependency must preserve the EAS lockfile.** EAS builds on Node 20 / npm 10, while
 this machine runs Node 24 / npm 11. npm 11 can write a lockfile npm 10 rejects, making EAS fail
@@ -145,8 +148,14 @@ Cross-file invariants that matter when changing things:
   controls (`recenter`, `errorBanner`) take their `bottom` inline from the same hook, so the
   bar's height stays a one-constant change (`TAB_BAR_BASE`).
 - **Platform split via filename**: `MapScreen.web.tsx` shadows `MapScreen.tsx` on web
-  because `react-native-maps` has no web support, so web renders a telemetry list instead.
+  because the user-facing Mapbox experience is native-only, so web renders a telemetry list instead.
   A change to the map screen's props or empty states needs applying to both files.
+- **Mapbox is native configuration.** `@rnmapbox/maps` is pinned in `package.json` and configured
+  through `app.json`; changing either requires rebuilding the development client. Its runtime
+  token is `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` (a scoped public token, never an account-management
+  token). MapScreen uses Mapbox Standard with a monochrome daytime import configuration: 3D
+  buildings and roads stay visible while POI labels stay hidden. Keep the Mapbox logo and
+  attribution visible above the floating tab bar.
 - **Event-specific map overlays are gated on group membership.** The geofence boundary
   (from `liveness.event.boundary`) and the landmarks (from `useEventLandmarks`, which calls
   `listLandmarks(event_id)`) render only when the user is in a group and only for that
@@ -154,7 +163,8 @@ Cross-file invariants that matter when changing things:
   shown regardless of liveness status (upcoming/live/ended) because they're wayfinding, not
   live position. Landmark pins are keyed by kind through `src/map/landmarkPins.tsx`; the web
   variant lists them as telemetry rows (no per-kind glyph). Keep both variants in step.
-  The boundary draws as a bare `Polygon` — **the event's name is deliberately not painted
+  The boundary draws through a GeoJSON `ShapeSource` with `FillLayer` and `LineLayer` — **the
+  event's name is deliberately not painted
   inside it.** It used to be, anchored by a scanline helper that found a point guaranteed to
   sit inside a concave geofence; it was cut as clutter, because the header pill already names
   the event permanently. Don't reintroduce an in-map event label.
@@ -171,25 +181,23 @@ Cross-file invariants that matter when changing things:
   `SymbolView`, whose own `fallback` prop covers Android and web — callers never branch on
   `Platform.OS`. `LANDMARK_SYMBOLS` is typed `SFSymbol`, a strict union, so a bad name is a
   compile error rather than a pin that renders empty on device; keep names at SF Symbols 4.0
-  or lower to stay under the iOS 16.4 deployment target. `SymbolView` is a *native* view, so
-  unlike the old icon-font glyph the marker needs the `tracksViewChanges` warm-up
-  `AvatarMarker` uses (start true, flip false on a timer). **It must end up false** — left
-  true, a screen of pins tanks the framerate on Android.
+  or lower to stay under the iOS 16.4 deployment target. The pins and member avatars are Mapbox
+  `MarkerView`s, so their React Native contents stay live without a snapshot warm-up. Keep the
+  total under Mapbox's roughly 100 MarkerView guidance; move static landmarks to a style layer
+  if a venue would exceed it.
 - **The currently-playing stage is marked on the map.** `MapScreen` passes `playing` down from
   the `currentSetForLandmark` it already computes for the header pill; the pin answers with a
-  magenta ring and a hotter gradient, plus a breathing `LiveHalo` **on iOS only**. Android
-  rasterises marker views, so an animation there would mean pinning `tracksViewChanges` true —
-  it gets the static ring instead.
+  magenta ring and a hotter gradient, plus a breathing `LiveHalo` on both native platforms.
 - **The map's chrome sits in two corner stacks, and both reserve room for a native
   control.** Top-left (`headerStack`) is identity: an `EventPill` above a `GroupPill`, one
   name each. They were a single two-part pill once — splitting them is what stops a long
   festival name and a long crew name from truncating each other, so keep one name per pill.
   Bottom-left (`locationStack`) is position: the where-you-are landmark pills. Both hug the
   left with `left` **and** `right` set, because bounding the row is what forces a long name to
-  truncate instead of growing into the corner control — `COMPASS_CLEARANCE` for Apple's
-  compass (top-right, appears once the map is rotated) and `RECENTER_CLEARANCE` for the
-  recenter button it shares a baseline with. Deliberately *not* `mapPadding`, which would also
-  shift the map's centring and leave `recenter`'s `animateCamera` off-centre.
+  truncate instead of growing into the corner control — `COMPASS_CLEARANCE` for Mapbox's
+  compass (top-right) and `RECENTER_CLEARANCE` for the recenter button it shares a baseline
+  with. Deliberately separate from camera padding, which would shift the map's centring and
+  leave recenter off-centre.
 - **A landmark can carry its own geofence** (`Landmark.boundary`, a [lat, lng] polygon).
   When the user's position falls inside one, its name shows in a teal pill in the bottom-left
   `locationStack` (`MapScreen.tsx`); the web variant surfaces the same as a "You're at:"
@@ -210,13 +218,12 @@ Cross-file invariants that matter when changing things:
   `onSelectStage`; for a `kind === "stage"` pin while liveness is `"live"` it opens an info
   bubble (current set's artist "Now playing", else next via `upcomingSetForLandmark` "Up next",
   else "No sets scheduled" — resolved by `stageCalloutFor`), any other pin just closes an open
-  one. The bubble is NOT a native `Callout` — that flashed its custom content before animating
-  and fought the ~1.5s location re-render. Instead `StageBubble` is a self-managed screen
-  overlay: the press handler resolves the pin's pixel anchor via `mapRef.pointForCoordinate`,
-  the bubble measures itself once while invisible, then fades/scales in above the pin, and it's
-  dismissed instantly by the `MapView`'s `onPress`/`onPanDrag` (and on recenter / liveness or
-  event change). The press handler reads live/sets from `stageDataRef` so it stays a stable
-  callback. The web variant has no map, so there's nothing to mirror there.
+  one. `StageDetailsMarker` is a live Mapbox `MarkerView` at the stage coordinate, positioned
+  above the visible stage marker with a spacer. It moves with the camera without JavaScript
+  screen-coordinate updates. Its close button, an empty-map `onPress`, liveness, or event change
+  dismisses it. The press handler
+  reads live/sets from `stageDataRef` so it stays a stable callback. The web variant has no map,
+  so there's nothing to mirror there.
 - **Live location is a WebSocket, not a poll.** `useLocationSocket` (`src/useLocationSocket.ts`)
   owns one socket to the active group, resolved once in `SignedInApp` and its `members` array
   passed down as a prop to every consumer (`MapScreen`, `MapScreen.web`, `GroupView`) — there is
@@ -272,14 +279,14 @@ Cross-file invariants that matter when changing things:
   behind the whole screen stack and is the only thing supplying hue, so a surface that sets
   an opaque `backgroundColor` punches a hole in the design.
 - **The map is split into chrome and map, and only the chrome is themed.** Everything
-  rendered *inside* `MapView` — the `AvatarMarker`s and their labels, `LandmarkMarker`'s
-  badge and label, the boundary `Polygon`, and everything in
+  rendered *inside* Mapbox `MapView` — the `AvatarMarker`s and their labels, `LandmarkMarker`'s
+  badge and label, the boundary layers, and everything in
   `src/map/landmarkPins.tsx` — keeps its own map-cartography palette (`PIN_COLORS`: teal
   `#14b8a6` landmarks, red medical, magenta live, plus orange members and indigo self) and is
-  deliberately *not* on Nightglass tokens: those marks have to read against Apple's pale
-  `mutedStandard` tiles, not against the Aurora. `landmarkPins.tsx` must not import
+  deliberately *not* on Nightglass tokens: those marks have to read against the pale Mapbox
+  basemap, not against the Aurora. `landmarkPins.tsx` must not import
   `src/ui/theme`. Everything overlaid on top of the map — the group/event and landmark pills,
-  the upcoming/ended message cards, the error banner, the recenter button, the `StageBubble`,
+  the upcoming/ended message cards, the error banner, the recenter button, the stage details,
   and the pre-GPS-fix waiting screen — is Nightglass glass. Keep that line when editing this
   screen. The one deliberate crossover is `LandmarkGlyph`, used by both the pin and the
   header pill so a kind looks the same in both.

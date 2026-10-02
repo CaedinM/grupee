@@ -15,13 +15,12 @@
   "dependencies": {
     "@clerk/clerk-react": "^5.61.9",
     "@clerk/themes": "^2.4.57",
-    "leaflet": "^1.9.4",
+    "mapbox-gl": "^3.18.1",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7",
-    "react-leaflet": "^5.0.0"
+    "react-dom": "^19.2.7"
   },
   "devDependencies": {
-    "@types/leaflet": "^1.9.21",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

@@ -11,6 +11,14 @@
       "distribution": "internal",
       "ios": { "simulator": true }
     },
+    "recruiter": {
+      "distribution": "store",
+      "ios": { "autoIncrement": "buildNumber" },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://wyat-staging.up.railway.app",
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_aGVscGVkLWltcGFsYS0zMC5jbGVyay5hY2NvdW50cy5kZXYk"
+      }
+    },
     "production": {
       "distribution": "store",
       "ios": { "autoIncrement": "buildNumber" },
@@ -21,6 +29,7 @@
     }
   },
   "submit": {
-    "production": { "ios": {} }
+    "production": { "ios": {} },
+    "recruiter": { "ios": {} }
   }
 }

@@ -14,19 +14,23 @@
 # `cd admin && npm run dev:prod`, which is a real operation rather than testing.
 # Don't add prod targets here: `make` should never be one typo away from live data.
 #
-# Assumes the documented local setup: Homebrew Postgres + Redis running, a
-# backend/.venv with deps installed, and backend/.env holding CLERK_PUBLISHABLE_KEY
-# + a local DATABASE_URL. See README.md for first-time setup.
+# Local targets point explicitly at the Docker Compose data services. The
+# backend/.env still holds CLERK_PUBLISHABLE_KEY for real sign-in.
 
-DB_NAME ?= wheretheyat_dev
+DB_NAME  = wheretheyat_dev
+DB_USER  = wheretheyat
+DB_URL   = postgresql://wheretheyat:localdev@localhost:5432/$(DB_NAME)
+REDIS_URL_LOCAL = redis://localhost:6379/0
+COMPOSE  = docker compose
 UVICORN  = .venv/bin/uvicorn
 ALEMBIC  = .venv/bin/alembic
-PSQL     = psql -d $(DB_NAME)
+PSQL     = $(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help backend backend-dev frontend frontend-staging admin admin-staging \
-        migrate reset reset-user grant-admin users smoke verify
+.PHONY: help setup services-up services-down services-status backend backend-dev \
+        frontend frontend-staging admin admin-staging migrate reset reset-user \
+        grant-admin users smoke verify
 
 help: ## List the available commands
 	@echo "Grupee — make <target>"
@@ -40,8 +44,29 @@ help: ## List the available commands
 
 ## --- run against your local backend ---------------------------------------
 
-backend: ## Backend on :8000 (real Clerk auth), reachable over Wi-Fi
-	cd backend && $(UVICORN) app.main:app --reload --host 0.0.0.0
+setup: ## One-time install, start local data services, and migrate the database
+	$(MAKE) services-up
+	@test -f backend/.env || cp backend/.env.example backend/.env
+	@test -f frontend/.env || cp frontend/.env.example frontend/.env
+	@test -f admin/.env || cp admin/.env.example admin/.env
+	@test -x backend/.venv/bin/python || python3.12 -m venv backend/.venv
+	backend/.venv/bin/python -m pip install -r backend/requirements.txt
+	cd frontend && npm ci
+	cd admin && npm ci
+	$(MAKE) migrate
+	@echo "Setup done. Add your Clerk key to the three .env files, then run make backend/frontend/admin."
+
+services-up: ## Start local Postgres and Redis; wait until healthy
+	$(COMPOSE) up -d --wait
+
+services-down: ## Stop local data services; keep Postgres data
+	$(COMPOSE) down
+
+services-status: ## Show local data service status
+	$(COMPOSE) ps
+
+backend: services-up ## Start data services, then backend on :8000 (real Clerk auth), reachable over Wi-Fi
+	cd backend && DATABASE_URL=$(DB_URL) REDIS_URL=$(REDIS_URL_LOCAL) $(UVICORN) app.main:app --reload --host 0.0.0.0
 
 frontend: ## Metro for the dev client → local backend (LAN auto-detect)
 	cd frontend && npm start
@@ -57,19 +82,19 @@ frontend-staging: ## Metro for the dev client → staging
 admin-staging: ## Admin console → staging
 	cd admin && npm run dev:staging
 
-backend-dev: ## Backend with AUTH_DEV_MODE=1 (only for `make smoke`)
-	cd backend && AUTH_DEV_MODE=1 $(UVICORN) app.main:app --reload
+backend-dev: services-up ## Start data services, then backend with AUTH_DEV_MODE=1 (only for `make smoke`)
+	cd backend && DATABASE_URL=$(DB_URL) REDIS_URL=$(REDIS_URL_LOCAL) AUTH_DEV_MODE=1 $(UVICORN) app.main:app --reload
 
 ## --- database & first-login ----------------------------------------------
 
 migrate: ## Apply Alembic migrations to the local database
-	cd backend && $(ALEMBIC) upgrade head
+	cd backend && DATABASE_URL=$(DB_URL) $(ALEMBIC) upgrade head
 
 reset: ## Wipe the DB (+ live positions) and re-migrate — true first-time login
-	dropdb --force --if-exists $(DB_NAME)
-	createdb $(DB_NAME)
-	cd backend && $(ALEMBIC) upgrade head
-	-redis-cli flushdb
+	$(COMPOSE) exec -T postgres dropdb -U $(DB_USER) --force --if-exists $(DB_NAME)
+	$(COMPOSE) exec -T postgres createdb -U $(DB_USER) $(DB_NAME)
+	$(MAKE) migrate
+	$(COMPOSE) exec -T redis redis-cli flushdb
 	@echo "Reset done. Log in on a client to re-provision, then: make grant-admin CLERK_ID=..."
 
 reset-user: ## Delete one user by CLERK_ID (keeps events) so next login re-provisions

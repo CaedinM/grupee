@@ -8,20 +8,18 @@ REST backend for Grupee, a festival friend-finder. Live location now flows over 
 
 Stack: FastAPI + SQLAlchemy 2.0 (synchronous, deliberately) + Pydantic v2. Postgres both places — a local Postgres for dev (engine parity with prod), Railway Postgres in production. SQLite still works as a zero-setup fallback (unset `DATABASE_URL`) and the code must stay portable to it, but local dev now targets Postgres by default. Live GPS positions are the exception to "it's all SQL": they live in Redis, not the SQL database (see the locations bullet below), so local dev and prod both need a Redis reachable at `REDIS_URL`.
 
+Before local setup, staging work, migrations, or deployment, read [`../SETUP.md`](../SETUP.md).
+It is the operational source of truth.
+
 ## Commands
 
 ```bash
-# setup (once)
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-
-# local Postgres + Redis (Homebrew on macOS; no Docker needed):
-#   brew install postgresql@14 redis
-#   brew services start postgresql@14 && brew services start redis
-#   createdb wheretheyat_dev
-# then in .env: DATABASE_URL=postgresql://<you>@localhost:5432/wheretheyat_dev
-# (unset DATABASE_URL to fall back to SQLite; REDIS_URL defaults to
-# redis://localhost:6379/0)
+# setup (once, from repo root; Docker Desktop must be running)
+make setup
+# Docker Postgres + Redis at localhost:5432 and localhost:6379
+# backend/.env uses DATABASE_URL=postgresql://wheretheyat:localdev@localhost:5432/wheretheyat_dev
+# (unset DATABASE_URL for direct commands to fall back to SQLite;
+# REDIS_URL defaults to redis://localhost:6379/0)
 
 # schema (required before first run — the app does no DDL at startup)
 alembic upgrade head
@@ -30,8 +28,7 @@ alembic upgrade head
 # AUTH_DEV_MODE=1 skips token verification for keyless local dev.
 uvicorn app.main:app --reload
 
-# reset local state (Postgres): dropdb wheretheyat_dev && createdb wheretheyat_dev && alembic upgrade head
-#   (or, from the repo root: `make reset` — also flushes Redis; `make grant-admin CLERK_ID=…`)
+# reset local state (Docker Postgres + Redis): make reset (from repo root)
 # reset local state (SQLite):   rm WhereTheyAt.db && alembic upgrade head
 
 # after changing models.py
@@ -47,7 +44,7 @@ AUTH_DEV_MODE=1 uvicorn app.main:app --reload   # in one terminal
 
 There is no pytest suite, linter, or build step — `smoke_test.sh` is the test, plus
 `python test_dwell_rules.py` for the set-attendance rules (plain asserts, no server, no Redis,
-no database — run it after touching `attendance._advance`). Reset local state with `dropdb wheretheyat_dev && createdb wheretheyat_dev && alembic upgrade head` (Postgres) or `rm WhereTheyAt.db && alembic upgrade head` (SQLite fallback).
+no database — run it after touching `attendance._advance`). Reset local Docker state with `make reset` from the repo root, or `rm WhereTheyAt.db && alembic upgrade head` for the SQLite fallback.
 
 ## Architecture
 

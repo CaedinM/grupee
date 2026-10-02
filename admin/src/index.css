@@ -642,7 +642,7 @@ button.primary:hover {
   color: var(--accent-soft);
 }
 
-/* Emoji pin: divIcon renders bare, so the chrome lives here. */
+/* Mapbox landmark marker chrome. */
 .landmark-pin {
   display: grid;
   place-items: center;
@@ -654,8 +654,8 @@ button.primary:hover {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
-.geofence-map.placing .map-canvas.leaflet-container {
-  cursor: copy;
+.landmark-pin.noninteractive {
+  pointer-events: none;
 }
 
 .create-actions {
@@ -682,15 +682,40 @@ button.primary:hover {
   background: var(--bg);
 }
 
-.map-canvas.leaflet-container {
-  cursor: crosshair;
+.map-message {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--muted);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+}
+
+.map-message code {
+  margin: 0 4px;
+  color: var(--accent-soft);
+}
+
+.map-error {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 2;
+  max-width: min(440px, calc(100% - 24px));
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 107, 107, 0.5);
+  border-radius: 8px;
+  background: rgba(16, 16, 20, 0.92);
+  color: #ffb4b4;
+  font-size: 13px;
 }
 
 .map-style-toggle {
   position: absolute;
   top: 12px;
   right: 12px;
-  z-index: 1000; /* above leaflet panes */
+  z-index: 2;
   background: rgba(16, 16, 20, 0.85);
 }
 

@@ -118,7 +118,7 @@ export type GlassProps = {
   /**
    * Opacity of a black underlay beneath the white wash, for glass that floats
    * over something bright rather than over the Aurora — the map chrome, whose
-   * backdrop is a light `mutedStandard` map. Without it, light text on a blur
+   * backdrop is a light Mapbox map. Without it, light text on a blur
    * of a pale map has no contrast. 0 (off) everywhere else.
    */
   scrim?: number;

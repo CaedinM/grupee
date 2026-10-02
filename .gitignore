@@ -1,40 +1,59 @@
-# build notes
-initial_backend_spec.md
-shipping.md
-
-# claude config files
-.claude/*
-
-# root files
-node_modules/
+# Local environment files and credentials. Commit .env.example files only.
 .env
+**/.env
+.env.*
+**/.env.*
+.env.local
+**/.env.local
+.env.*.local
+**/.env.*.local
+!**/.env.example
+!admin/.env.staging
+!admin/.env.production
 
-# frontend files
-frontend/.env
-frontend/node_modules/
+# Private signing keys and mobile provisioning material.
+*.pem
+*.key
+*.p8
+*.p12
+*.mobileprovision
+*.keystore
+*.jks
+credentials.json
+GoogleService-Info.plist
+google-services.json
+
+# Dependencies, generated builds, and tool state.
+node_modules/
+**/node_modules/
 frontend/.expo/
-
-# admin files
-admin/.env
-admin/node_modules/
 admin/dist/
+frontend/ios/build/
+frontend/android/build/
+*.ipa
+*.apk
+*.aab
+*.xcarchive
+*.dSYM.zip
 
-# backend files
-backend/.env
-backend/.venv
-
-# backend database
+# Python virtual environments, caches, and local data.
+backend/.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 backend/WhereTheyAt.db
 *.db-journal
 *.db-wal
 *.db-shm
-
-# image uploads
 backend/uploads/
 
-# macos files
+# Local editor and operating-system state.
+.claude/
 .DS_Store
 
-# Python caches
-**/__pycache__/*
-*.py[cod]
+# Internal planning notes.
+initial_backend_spec.md
+shipping.md

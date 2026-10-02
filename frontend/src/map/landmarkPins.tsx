@@ -4,7 +4,7 @@
  * the header landmark pill, so a kind looks the same wherever it appears.
  *
  * Note this module is map cartography, not Nightglass — the colours here are
- * tuned to read against Apple's pale `mutedStandard` tiles, not against the
+ * tuned to read against the pale Mapbox festival basemap, not against the
  * Aurora, so it deliberately does not import `src/ui/theme`. See AGENTS.md.
  */
 import { Ionicons } from "@expo/vector-icons";

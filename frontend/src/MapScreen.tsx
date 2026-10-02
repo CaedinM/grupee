@@ -1,8 +1,17 @@
 import { Ionicons } from "@expo/vector-icons";
+import Mapbox, {
+  Camera,
+  FillLayer,
+  LineLayer,
+  MapView as MapboxMapView,
+  MarkerView,
+  ShapeSource,
+  StyleImport,
+  type Camera as MapboxCamera,
+} from "@rnmapbox/maps";
 import { LinearGradient } from "expo-linear-gradient";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, Platform, Pressable, StyleSheet, Text, View } from "react-native";
-import MapView, { Marker, Polygon } from "react-native-maps";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Animated, Easing, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
@@ -40,22 +49,66 @@ function formatStartsAt(iso: string): string {
   });
 }
 
-// Muted-monochrome 3D look (closest Apple Maps gets to the Mapbox "light"
-// style — the real thing needs @rnmapbox/maps and a dev build, see
-// shipping.md). Pitch tilts the camera so building volumes render; altitude
-// (iOS) / zoom (Android) put it low enough that they actually appear.
-const CAMERA_TILT = { pitch: 55, heading: 0, altitude: 700, zoom: 17 };
+const MAPBOX_ACCESS_TOKEN = process.env.EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN;
+
+// The access token is public by design: Mapbox map tokens are shipped in the
+// app. Keep its scopes to styles/fonts reads and create it separately from any
+// account-management token. Native SDK download no longer requires a token.
+if (MAPBOX_ACCESS_TOKEN) void Mapbox.setAccessToken(MAPBOX_ACCESS_TOKEN);
+
+// Standard gives us current cartography and 3D buildings, while its import
+// configuration gives the festival map the calm, light treatment we need
+// without relying on Apple Maps' fixed styles.
+const MAPBOX_STYLE_URL = "mapbox://styles/mapbox/standard";
+const MAPBOX_STYLE_CONFIG = {
+  lightPreset: "day",
+  theme: "monochrome",
+  show3dBuildings: true,
+  show3dFacades: true,
+  showPointOfInterestLabels: false,
+  showRoadLabels: true,
+  showPlaceLabels: true,
+} as const;
+
+const CAMERA_TILT = { pitch: 55, heading: 0, zoomLevel: 17 };
+
+const EVENT_BOUNDARY_FILL = {
+  fillColor: "#5b5bf0",
+  fillOpacity: 0.08,
+} as const;
+
+const EVENT_BOUNDARY_LINE = {
+  lineColor: "#5b5bf0",
+  lineOpacity: 0.9,
+  lineWidth: 2,
+} as const;
+
+type MapboxCoordinate = [longitude: number, latitude: number];
+
+function toMapboxCoordinate({ latitude, longitude }: { latitude: number; longitude: number }): MapboxCoordinate {
+  return [longitude, latitude];
+}
+
+/** The API stores rings as [latitude, longitude]; GeoJSON requires [longitude, latitude]. */
+function boundaryShape(boundary: [number, number][] | null): GeoJSON.Feature<GeoJSON.Polygon> | null {
+  if (!boundary || boundary.length < 3) return null;
+  const ring = boundary.map(([latitude, longitude]) => [longitude, latitude] as MapboxCoordinate);
+  const [first] = ring;
+  const last = ring[ring.length - 1];
+  if (first[0] !== last[0] || first[1] !== last[1]) ring.push(first);
+  return { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [ring] } };
+}
 
 // Map chrome is the one place glass floats over something bright rather than
-// over the Aurora — `mutedStandard` is a pale map. Without a scrim under the
-// wash, light text on a blur of it has no contrast.
+// over the Aurora — the pale Mapbox style needs a scrim so light text stays
+// legible through the blur.
 const MAP_SCRIM = 0.46;
 
-// Horizontal space kept clear on the right of the header row. Apple Maps draws
-// its compass in that corner as soon as the map is rotated, and it's a real
-// control — the pills bound themselves rather than covering it. Reserving space
-// (instead of `mapPadding`) keeps the map's own centring untouched, so
-// `recenter`'s animateCamera still lands the user in the middle of the screen.
+// Horizontal space kept clear on the right of the header row. Mapbox draws its
+// compass in that corner, and it's a real control — the pills bound themselves
+// rather than covering it. Reserving space
+// (instead of camera padding) keeps the map's own centring untouched, so
+// recenter still lands the user in the middle of the screen.
 const COMPASS_CLEARANCE = 64;
 
 // Same idea at the bottom: the recenter button is 46px inset 20px from the
@@ -82,24 +135,21 @@ export default function MapScreen({
 }) {
   const { permission, fix, lastAck, error } = reporting;
   const live = liveness.status === "live";
-  const mapRef = useRef<MapView>(null);
+  const cameraRef = useRef<MapboxCamera>(null);
   const insets = useSafeAreaInsets();
   // The tab bar floats over the map, so the bottom-anchored controls position
   // themselves above it rather than against the screen edge.
   const clearance = useTabBarClearance();
 
-  // Which stage's info bubble is open, and where to anchor it (screen pixels).
-  // We render the bubble ourselves as an overlay rather than using a native
-  // Callout: the custom-tooltip Callout draws its content once before animating
-  // (a visible flash) and fights the ~1.5s location re-render. A plain overlay
-  // gives full control over show/hide and the pop-in.
+  // The selected stage's details live in a Mapbox marker at its coordinate,
+  // so Mapbox moves them with the map without projecting screen pixels in JS.
   const [selectedStage, setSelectedStage] = useState<SelectedStage | null>(null);
   const closeStage = useCallback(() => setSelectedStage(null), []);
 
   // The press handler is stable (so markers stay cheap), but needs the current
   // live flag and schedule — read them from a ref that each render refreshes.
   const stageDataRef = useRef<{ live: boolean; sets: EventSet[] }>({ live: false, sets: [] });
-  const onSelectStage = useCallback(async (landmark: Landmark) => {
+  const onSelectStage = useCallback((landmark: Landmark) => {
     const { live, sets } = stageDataRef.current;
     // Tapping any non-stage pin (or any pin outside a live event) just closes an
     // open bubble; only live stages open one.
@@ -108,11 +158,7 @@ export default function MapScreen({
       return;
     }
     const callout = stageCalloutFor(sets, landmark.id, Date.now());
-    const point = await mapRef.current?.pointForCoordinate({
-      latitude: landmark.lat,
-      longitude: landmark.lng,
-    });
-    if (point) setSelectedStage({ landmark, callout, x: point.x, y: point.y });
+    setSelectedStage({ landmark, callout });
   }, []);
 
   const coordinate = fix
@@ -128,6 +174,7 @@ export default function MapScreen({
   // The event's geofence, drawn for group members whether the event is live
   // yet or not — it shows where to head. Points are [lat, lng].
   const boundary = group ? (liveness.event?.boundary ?? null) : null;
+  const eventBoundary = useMemo(() => boundaryShape(boundary), [boundary]);
 
   // Landmarks are gated exactly like the boundary: only for the event the
   // active group belongs to, and only while in that group (a null event_id
@@ -143,12 +190,15 @@ export default function MapScreen({
   useEffect(() => setSelectedStage(null), [live, group?.event_id]);
 
   const recenter = () => {
-    // Recentering moves the map, so the overlay bubble's anchor would drift —
-    // close it rather than leave it floating over the wrong pin.
-    setSelectedStage(null);
     if (coordinate) {
-      // animateCamera (not animateToRegion) so the 3D pitch survives recentering.
-      mapRef.current?.animateCamera({ center: coordinate, ...CAMERA_TILT }, { duration: 300 });
+      // Use the same pitched camera as the opening view rather than snapping
+      // to a flat map when someone asks to find themselves again.
+      cameraRef.current?.setCamera({
+        centerCoordinate: toMapboxCoordinate(coordinate),
+        ...CAMERA_TILT,
+        animationMode: "easeTo",
+        animationDuration: 300,
+      });
     }
   };
 
@@ -179,6 +229,25 @@ export default function MapScreen({
 
   const displayedError = error ?? membersError;
 
+  if (!MAPBOX_ACCESS_TOKEN) {
+    return (
+      <View style={styles.waiting}>
+        <Reveal style={styles.waitingBlock}>
+          <Text style={styles.waitingEyebrow}>Map unavailable</Text>
+          <Text style={typeScale.hero}>Mapbox needs setup</Text>
+          <GlassSurface r={radius.lg} style={styles.waitingCard}>
+            <View style={styles.waitingBody}>
+              <Text style={styles.waitingText}>
+                Add EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN to the app environment, then restart Metro or
+                build the app with that environment variable.
+              </Text>
+            </View>
+          </GlassSurface>
+        </Reveal>
+      </View>
+    );
+  }
+
   // Landmarks whose geofence currently contains the user. Landmarks are already
   // scoped to the active group's event, so this answers "which landmark am I in
   // at the event I'm at". Usually one, but overlapping zones can yield several.
@@ -190,26 +259,31 @@ export default function MapScreen({
 
   return (
     <View style={styles.container}>
-      <MapView
-        ref={mapRef}
+      <MapboxMapView
         style={StyleSheet.absoluteFill}
-        initialCamera={{ center: coordinate, ...CAMERA_TILT }}
-        // mutedStandard is Apple Maps only; Android keeps the standard style.
-        mapType={Platform.OS === "ios" ? "mutedStandard" : "standard"}
-        showsBuildings
-        showsPointsOfInterest={false}
-        // A tap on empty map, or the start of a pan/zoom, closes the stage
-        // bubble instantly — no waiting on a native deselect.
+        styleURL={MAPBOX_STYLE_URL}
+        compassEnabled
+        compassViewPosition={1}
+        compassViewMargins={{ x: 12, y: insets.top + 12 }}
+        logoEnabled
+        logoPosition={{ bottom: clearance + 14, left: 12 }}
+        attributionEnabled
+        attributionPosition={{ bottom: clearance + 14, right: 12 }}
+        // An empty-map tap closes the details; Mapbox moves their marker with
+        // the selected stage during camera movement.
         onPress={closeStage}
-        onPanDrag={closeStage}
       >
-        {boundary && (
-          <Polygon
-            coordinates={boundary.map(([latitude, longitude]) => ({ latitude, longitude }))}
-            strokeColor="rgba(91, 91, 240, 0.9)"
-            strokeWidth={2}
-            fillColor="rgba(91, 91, 240, 0.08)"
-          />
+        <Camera
+          ref={cameraRef}
+          defaultSettings={{ centerCoordinate: toMapboxCoordinate(coordinate), ...CAMERA_TILT }}
+        />
+        <StyleImport id="basemap" existing config={MAPBOX_STYLE_CONFIG} />
+
+        {eventBoundary && (
+          <ShapeSource id="event-boundary" shape={eventBoundary}>
+            <FillLayer id="event-boundary-fill" slot="middle" style={EVENT_BOUNDARY_FILL} />
+            <LineLayer id="event-boundary-line" slot="middle" style={EVENT_BOUNDARY_LINE} />
+          </ShapeSource>
         )}
 
         {landmarks.map((l) => (
@@ -222,6 +296,10 @@ export default function MapScreen({
             onPress={onSelectStage}
           />
         ))}
+
+        {selectedStage && (
+          <StageDetailsMarker selection={selectedStage} onClose={closeStage} />
+        )}
 
         {others.map((m) => (
           <AvatarMarker
@@ -239,15 +317,7 @@ export default function MapScreen({
           uri={avatarSource(user)?.uri ?? null}
           color="#5b5bf0"
         />
-      </MapView>
-
-      {selectedStage && (
-        <StageBubble
-          // Remount per stage so the pop-in animation replays on each new tap.
-          key={selectedStage.landmark.id}
-          selection={selectedStage}
-        />
-      )}
+      </MapboxMapView>
 
       {/* Nothing to show without a group — the centre overlay is what prompts
           joining one. Event above group, each in its own pill: sharing one pill
@@ -437,22 +507,17 @@ function AvatarMarker({
   color: string;
   label?: string;
 }) {
-  // Google Maps (Android) snapshots marker children, so keep re-rendering
-  // until the remote image has actually drawn; static content after that.
-  const [tracksChanges, setTracksChanges] = useState(uri !== null);
-
   return (
-    <Marker
-      coordinate={coordinate}
+    <MarkerView
+      coordinate={toMapboxCoordinate(coordinate)}
       anchor={{ x: 0.5, y: label ? 0.3 : 0.5 }}
-      tracksViewChanges={tracksChanges}
+      allowOverlap
     >
       <View style={styles.markerWrap}>
         {uri ? (
           <Image
             source={{ uri }}
             style={[styles.markerAvatar, { borderColor: color }]}
-            onLoad={() => setTimeout(() => setTracksChanges(false), 150)}
           />
         ) : (
           <View style={[styles.markerAvatar, styles.markerFallback, { borderColor: color }]}>
@@ -467,7 +532,7 @@ function AvatarMarker({
           </View>
         )}
       </View>
-    </Marker>
+    </MarkerView>
   );
 }
 
@@ -475,9 +540,8 @@ function AvatarMarker({
 // "No sets scheduled") and the artist, or null when there's no set to name.
 type StageCallout = { heading: string; artist: string | null };
 
-// An open stage bubble: the stage and its resolved copy, plus the screen-pixel
-// anchor (the pin's centre) the overlay is positioned against.
-type SelectedStage = { landmark: Landmark; callout: StageCallout; x: number; y: number };
+// An open stage callout: the stage and its resolved copy.
+type SelectedStage = { landmark: Landmark; callout: StageCallout };
 
 // The bubble copy for a stage at time `now`: who's on, else who's next, else a
 // no-schedule note. Module-level so the marker press handler can call it with
@@ -529,10 +593,8 @@ function anchorFor(tier: PinTier): { x: number; y: number } {
  * below member avatars. Tapping it calls `onPress`; the parent decides whether
  * that stage opens a bubble.
  *
- * Unlike the old Ionicon version, the glyph is a native `SymbolView` on iOS,
- * which may not have laid out when the marker first captures — hence the same
- * tracksViewChanges warm-up `AvatarMarker` uses for its remote images. It must
- * end up false: left true, a screen of pins tanks the framerate on Android.
+ * MarkerView keeps the React Native marker live rather than rasterising it, so
+ * SF Symbols and the stage halo draw reliably on both native platforms.
  */
 function LandmarkMarker({
   landmark,
@@ -544,12 +606,6 @@ function LandmarkMarker({
   playing: boolean;
   onPress: (landmark: Landmark) => void;
 }) {
-  const [tracksChanges, setTracksChanges] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setTracksChanges(false), 200);
-    return () => clearTimeout(t);
-  }, []);
-
   const tier = PIN_TIERS[landmark.kind] ?? "secondary";
   const size = PIN_SIZE[tier];
   const tint = pinColorFor(landmark.kind);
@@ -594,14 +650,12 @@ function LandmarkMarker({
   );
 
   return (
-    <Marker
-      coordinate={{ latitude: landmark.lat, longitude: landmark.lng }}
+    <MarkerView
+      coordinate={[landmark.lng, landmark.lat]}
       anchor={anchorFor(tier)}
-      tracksViewChanges={tracksChanges}
-      zIndex={tier === "primary" ? 1 : 0}
-      onPress={() => onPress(landmark)}
+      allowOverlap
     >
-      <View style={styles.landmarkWrap}>
+      <Pressable onPress={() => onPress(landmark)} style={styles.landmarkWrap}>
         <View>
           {/* The halo sits behind the badge, so it grows out from under it. */}
           {playing && <LiveHalo size={size} />}
@@ -616,8 +670,8 @@ function LandmarkMarker({
             {landmark.name}
           </Text>
         )}
-      </View>
-    </Marker>
+      </Pressable>
+    </MarkerView>
   );
 }
 
@@ -626,15 +680,13 @@ function LandmarkMarker({
  * as the app's PulseDot, reimplemented here so the marker keeps the map palette
  * rather than importing Nightglass tokens.
  *
- * iOS only. Android rasterises marker views, so an animation there would need
- * tracksViewChanges pinned true — which costs far more frames than the halo is
- * worth. Android keeps the static magenta ring the badge already has.
+ * Mapbox MarkerView keeps this React Native view live on both platforms, so
+ * the animation does not require the marker snapshot workarounds used before.
  */
 function LiveHalo({ size }: { size: number }) {
   const t = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (Platform.OS !== "ios") return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(t, {
@@ -649,8 +701,6 @@ function LiveHalo({ size }: { size: number }) {
     loop.start();
     return () => loop.stop();
   }, [t]);
-
-  if (Platform.OS !== "ios") return null;
 
   return (
     <Animated.View
@@ -669,61 +719,39 @@ function LiveHalo({ size }: { size: number }) {
   );
 }
 
-// The stage info bubble, drawn as a screen overlay rather than a native Callout.
-// It starts invisible, measures itself once, then fades+scales in above the pin
-// — so there's no unpositioned flash and no fight with the map's re-renders.
-const BUBBLE_GAP = 16; // px between the pin centre and the bubble's bottom edge
-
-function StageBubble({ selection }: { selection: SelectedStage }) {
-  const { landmark, callout, x, y } = selection;
-  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const anim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (!size) return;
-    Animated.timing(anim, {
-      toValue: 1,
-      duration: 140,
-      easing: Easing.out(Easing.quad),
-      useNativeDriver: true,
-    }).start();
-  }, [size, anim]);
-
-  // Anchor bottom-centre of the bubble just above the pin. Until measured it
-  // sits at the raw point but stays invisible, so the reposition never shows.
-  const left = size ? x - size.width / 2 : x;
-  const top = size ? y - size.height - BUBBLE_GAP : y;
-
+/** Live React Native content inside a Mapbox marker at the stage coordinate. */
+function StageDetailsMarker({
+  selection,
+  onClose,
+}: {
+  selection: SelectedStage;
+  onClose: () => void;
+}) {
+  const { landmark, callout } = selection;
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Animated.View
-        onLayout={(e) => {
-          if (!size) {
-            const { width, height } = e.nativeEvent.layout;
-            setSize({ width, height });
-          }
-        }}
-        style={[
-          styles.calloutBubble,
-          {
-            position: "absolute",
-            left,
-            top,
-            opacity: size ? anim : 0,
-            transform: [
-              { scale: anim.interpolate({ inputRange: [0, 1], outputRange: [0.94, 1] }) },
-              { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) },
-            ],
-          },
-        ]}
-      >
-        {/* The glass is inside the measured/positioned wrapper, so it sizes to
-            its content and the anchor maths above is unaffected. */}
-        <GlassSurface r={radius.md} intensity={68} scrim={0.55} raised>
+    <MarkerView
+      coordinate={[landmark.lng, landmark.lat]}
+      anchor={{ x: 0.5, y: 1 }}
+      allowOverlap
+      isSelected
+      pointerEvents="box-none"
+    >
+      <View style={styles.stageDetailsMarker} pointerEvents="box-none">
+        <View style={styles.calloutBubble}>
           <View style={styles.calloutBody}>
-            <Text style={styles.calloutStage} numberOfLines={1}>
-              {landmark.name}
-            </Text>
+            <View style={styles.calloutTopRow}>
+              <Text style={styles.calloutStage} numberOfLines={1}>
+                {landmark.name}
+              </Text>
+              <Pressable
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Close stage details"
+                hitSlop={8}
+              >
+                <Ionicons name="close" size={17} color={color.textDim} />
+              </Pressable>
+            </View>
             <View style={styles.calloutHeadingRow}>
               {callout.heading === "Now playing" && <PulseDot />}
               <Text style={styles.calloutHeading}>{callout.heading}</Text>
@@ -734,9 +762,10 @@ function StageBubble({ selection }: { selection: SelectedStage }) {
               </Text>
             )}
           </View>
-        </GlassSurface>
-      </Animated.View>
-    </View>
+        </View>
+        <View style={styles.stageDetailsSpacer} pointerEvents="none" />
+      </View>
+    </MarkerView>
   );
 }
 
@@ -896,18 +925,39 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     letterSpacing: -0.2,
   },
-  // Tooltip-style callout (no default OS bubble), drawn as glass like the rest
-  // of the map chrome. Width-bounded so long artist names wrap instead of
-  // stretching the map.
+  // The spacer puts the bubble above the visible stage badge and label while
+  // the marker's bottom remains attached to the stage coordinate.
+  stageDetailsMarker: {
+    alignItems: "center",
+  },
+  stageDetailsSpacer: {
+    height: 80,
+  },
   calloutBubble: {
-    maxWidth: 210,
+    width: 218,
+    borderRadius: radius.md,
+    backgroundColor: "rgba(24, 24, 34, 0.96)",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.2)",
+    shadowColor: "#000",
+    shadowOpacity: 0.28,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
   },
   calloutBody: {
     paddingHorizontal: space.lg,
     paddingVertical: space.md,
     gap: 3,
   },
+  calloutTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: space.sm,
+  },
   calloutStage: {
+    flex: 1,
     fontFamily: font.sansSemi,
     color: color.teal,
     fontSize: 12,

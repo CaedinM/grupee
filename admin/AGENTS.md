@@ -16,10 +16,13 @@ the backend (`../backend`); the three meet only at the HTTP contract in
 `../backend/CLAUDE.md`. This app is the *authoring* side: everything it writes
 (events, landmarks, sets) is the cold, admin-owned data the phone app reads.
 
-Stack: Vite 8 · React 19 · TypeScript · Clerk (`@clerk/clerk-react`) · Leaflet /
-`react-leaflet` for the maps · oxlint. No router library, no state library, no
+Stack: Vite 8 · React 19 · TypeScript · Clerk (`@clerk/clerk-react`) · Mapbox GL JS for the
+map · oxlint. No router library, no state library, no
 component framework — plain `useState`/`useEffect` and hand-rolled CSS in
 `src/index.css`.
+
+Before local setup, staging work, or production deployment, read
+[`../SETUP.md`](../SETUP.md). It is the operational source of truth.
 
 ## Commands
 
@@ -35,7 +38,7 @@ npx tsc -b             # typecheck only — the gate; run before calling a chang
 
 There is no test suite. `tsc -b` (also run by `build`) plus `oxlint` are the
 checks. Which backend a run targets is `VITE_API_URL`; see the env bullet and
-`../README.md` (staging vs production flows).
+`../SETUP.md` (staging and production operations).
 
 ## Architecture
 
@@ -46,7 +49,7 @@ sub-flows work without a router), `<SignedIn>` shows `AdminGate`.
 
 Screens live flat in `src/`, one component per file: `App.tsx` (auth gate +
 `Shell` + event list), `CreateEvent.tsx` (the event/landmark/geofence editor,
-the one big multi-step flow), `GeofenceMap.tsx` (the Leaflet map + polygon
+the one big multi-step flow), `GeofenceMap.tsx` (the Mapbox GL JS map + polygon
 drawing), `EventSets.tsx` (the set-schedule calendar), `EventDashboard.tsx`
 (read-only event overview). Every network call goes through `src/api.ts`.
 
@@ -92,11 +95,12 @@ Cross-file invariants that matter when changing things:
   and the inverse). The backend stores everything UTC (`TZDateTime`). Never send a
   raw datetime-local string to the API or render a raw ISO string in an input.
 - **Geometry is `[lat, lng]` everywhere**, matching the backend's boundary point
-  order and Leaflet's `LatLng`. `GeofenceMap` draws boundary polygons of
+order. `GeofenceMap` converts coordinates to Mapbox's `[lng, lat]` format only while rendering
+and converts map clicks back to `[lat, lng]`. It draws boundary polygons of
   `MIN_POINTS`(3)–`MAX_POINTS`(200) vertices for both the event boundary and
-  per-landmark geofences; landmark pins are emoji `divIcon`s keyed by kind via
-  `LANDMARK_META`/`landmarkEmoji` in `api.ts`. Tiles are CARTO dark (default) or
-  Esri satellite. If you touch the point model, keep event boundary and landmark
+  per-landmark geofences; landmark pins are emoji Mapbox markers keyed by kind via
+`LANDMARK_META`/`landmarkEmoji` in `api.ts`. The default basemap is Mapbox Standard with its
+night preset; the control switches to Mapbox Standard Satellite. If you touch the point model, keep event boundary and landmark
   boundary — both `LatLng[]` — consistent.
 - **`LANDMARK_KINDS` here is a deliberate subset** (`entrance`, `exit`,
   `restroom`, `stage`) of what the backend accepts (it also takes `food`,
@@ -114,11 +118,12 @@ Cross-file invariants that matter when changing things:
 
 - **Env vars** (Vite only exposes `VITE_`-prefixed ones to the client):
   `VITE_CLERK_PUBLISHABLE_KEY` (required — `main.tsx` throws without it; same Clerk
-  instance and key as the phone app and backend) and `VITE_API_URL` (the backend
-  base; unset falls back to `http://localhost:8000`). The Clerk key lives in the
-  gitignored `.env`; the backend URL per environment lives in the committed
+  instance and key as the phone app and backend), `VITE_API_URL` (the backend
+  base; unset falls back to `http://localhost:8000`), and required
+  `VITE_MAPBOX_ACCESS_TOKEN` (a public `pk_` token for the event editor map).
+  The keys live in the gitignored `.env`; the backend URL per environment lives in the committed
   `.env.staging` / `.env.production` (public URLs, no secrets), which
-  `--mode staging` / `--mode production` load on top of `.env`. See `../README.md`.
+  `--mode staging` / `--mode production` load on top of `.env`. See `../SETUP.md`.
 - **Not yet deployed.** Only the backend + Postgres + Redis run on Railway so far;
   the console is run locally against a deployed backend. When it does ship, it's a
   static `vite build` (host anywhere) with `VITE_API_URL` baked in per environment
