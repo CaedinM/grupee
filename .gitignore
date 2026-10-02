@@ -8,6 +8,7 @@
 .env.*.local
 **/.env.*.local
 !**/.env.example
+!frontend/.env.*.example
 !admin/.env.staging
 !admin/.env.production
 

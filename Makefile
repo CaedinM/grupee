@@ -47,14 +47,14 @@ help: ## List the available commands
 setup: ## One-time install, start local data services, and migrate the database
 	$(MAKE) services-up
 	@test -f backend/.env || cp backend/.env.example backend/.env
-	@test -f frontend/.env || cp frontend/.env.example frontend/.env
+	@test -f frontend/.env.dev || cp frontend/.env.dev.example frontend/.env.dev
 	@test -f admin/.env || cp admin/.env.example admin/.env
 	@test -x backend/.venv/bin/python || python3.12 -m venv backend/.venv
 	backend/.venv/bin/python -m pip install -r backend/requirements.txt
 	cd frontend && npm ci
 	cd admin && npm ci
 	$(MAKE) migrate
-	@echo "Setup done. Add your Clerk key to the three .env files, then run make backend/frontend/admin."
+	@echo "Setup done. Add your Clerk key to backend/.env, frontend/.env.dev, and admin/.env, then run make backend/frontend/admin."
 
 services-up: ## Start local Postgres and Redis; wait until healthy
 	$(COMPOSE) up -d --wait

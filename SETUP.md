@@ -33,13 +33,13 @@ brew services stop redis
 
    ```dotenv
    CLERK_PUBLISHABLE_KEY=pk_test_...             # backend/.env
-   EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_... # frontend/.env
+   EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_... # frontend/.env.dev
    VITE_CLERK_PUBLISHABLE_KEY=pk_test_...        # admin/.env
    ```
 
 `make setup` creates missing environment files from their examples, installs dependencies,
 starts Docker Postgres and Redis, and applies Alembic migrations. It never overwrites an
-existing `.env` file.
+existing environment file.
 
 The local database URL is
 `postgresql://wheretheyat:localdev@localhost:5432/wheretheyat_dev`. Local Make targets set it
@@ -48,7 +48,7 @@ themselves. Leave `REDIS_URL` unset for `redis://localhost:6379/0`, and leave
 
 Set `VITE_MAPBOX_ACCESS_TOKEN=pk_...` in `admin/.env` to render the event editor map. It may use
 the same public Mapbox token as the Expo app, where it is named
-`EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN`.
+`EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN` in `frontend/.env.dev`.
 
 ### Run locally
 
@@ -92,7 +92,7 @@ Developer Mode. Keep the phone and Mac on the same Wi-Fi while Metro and the bac
 running. Rebuild only after changing `app.json`, a config plugin, native permissions, or a
 native dependency.
 
-Set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk_...` in `frontend/.env` to render the native map.
+Set `EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN=pk_...` in `frontend/.env.dev` to render the native map.
 Create a Clerk JWT template named `background` with a 43,200-second lifetime and
 `{"scope": "bg-location"}` to test background reporting.
 
@@ -123,6 +123,10 @@ Run clients against staging from the repository root:
 make frontend-staging
 make admin-staging
 ```
+
+Populate `frontend/.env.staging` from `frontend/.env.staging.example` before starting the
+mobile client. The file is gitignored and must contain the staging Clerk publishable key and
+staging API URL.
 
 The staging database begins empty. Create or provision an admin user, then create an event,
 boundary, landmarks, and current set before testing the mobile app.
@@ -164,6 +168,10 @@ The only local command that targets the production API is for intentional festiv
 cd admin
 npm run dev:prod
 ```
+
+`frontend/.env.prod` is a gitignored local reference file. Populate it from
+`frontend/.env.prod.example` when needed, but it is not used by local Metro commands or EAS
+cloud builds. The production EAS profile in `frontend/eas.json` remains the build-time source.
 
 The `production` EAS profile targets the production API. Build and submit it only when the app
 is ready for App Store Connect:

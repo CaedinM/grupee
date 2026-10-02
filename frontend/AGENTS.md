@@ -39,8 +39,8 @@ checks and gets a degraded map. Backend contract and the hot paths it cares abou
 ## Commands
 
 ```bash
-npm start          # Metro; loads into the dev client. Backend URL from .env (or LAN fallback)
-npm run start:staging  # …forced at the Railway staging backend (clears Metro cache)
+npm start          # Metro; loads frontend/.env.dev into the dev client
+npm run start:staging  # Metro; loads frontend/.env.staging (clears Metro cache)
 npm run ios        # simulator
 npm run web        # browser (no real map — see the platform-split bullet)
 npx tsc --noEmit   # the only automated check in this package
@@ -51,16 +51,20 @@ tar -xzf <artifact>.tar.gz && xcrun simctl install booted Grupee.app
 ```
 
 There is no test suite, linter, or build step. `npx tsc --noEmit` is the gate — run it
-before calling a change done. `.env` holds `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and the
-optional `EXPO_PUBLIC_API_URL`; Expo only reads it at start, so a key change needs a restart.
+before calling a change done. `npm start` loads `.env.dev` and `npm run start:staging` loads
+`.env.staging`; each holds `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` and the optional
+`EXPO_PUBLIC_API_URL`. Expo reads values at start, so a key change needs a restart.
 
-**Which backend a run targets** is `EXPO_PUBLIC_API_URL`. Expo has no arbitrary `--mode`,
-so `start:staging` sets that var **inline** in the script (an inline env var wins over `.env`
-in Expo's loader) and passes `--clear` — required, because the URL is inlined into the bundle
-and Metro caches it, so switching environments without clearing keeps serving the old host.
-Plain `npm start` uses whatever `.env` says, and falls back to the Expo dev-server's LAN IP
-(`resolveBaseUrl` in `src/api.ts`) when the var is unset. Confirm the live value in the app's
-**Profile tab** (`ProfileScreen.tsx` renders `BASE_URL`).
+`AuthScreen` completes password sign-in and Clerk's email-code second factor. When Clerk returns
+`needs_second_factor`, use the account's `email_code` factor; SMS, authenticator-app, and backup
+code factors are not supported by this product.
+
+**Which backend a run targets** is `EXPO_PUBLIC_API_URL`. The startup scripts select their
+environment file with `dotenv-cli`, disable Expo's automatic `.env` loading, and clear Metro's
+cache so a switch cannot retain an inlined URL. `.env.dev` leaves the URL empty for the Expo
+dev-server's LAN fallback (`resolveBaseUrl` in `src/api.ts`); `.env.staging` sets the Railway
+staging URL. Confirm the live value in the app's **Profile tab** (`ProfileScreen.tsx` renders
+`BASE_URL`).
 
 **There is deliberately no `start:prod`.** The dev app never points at production — that data
 is real users, and production is reached only through TestFlight / App Store builds
